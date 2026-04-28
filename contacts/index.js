@@ -3,9 +3,10 @@
  * Provides contacts tools via CardDAV
  */
 
-const { listContacts, searchContacts, getContact, createContact, deleteContact } = require('./carddav-client');
-const { formatSuccess, formatError, withErrorHandler } = require('../utils/error-handler');
 const config = require('../config');
+const useLocal = config.USE_LOCAL_MODE && config.IS_MACOS;
+const { listContacts, searchContacts, getContact, createContact, deleteContact } = useLocal ? require('./local-client') : require('./carddav-client');
+const { formatSuccess, formatError, withErrorHandler } = require('../utils/error-handler');
 
 /**
  * Handler: List contacts

@@ -54,6 +54,24 @@ Setup instructions:
  * Handler: Check authentication status
  */
 async function handleCheckAuthStatus() {
+  if (config.USE_LOCAL_MODE && config.IS_MACOS) {
+    return formatSuccess(
+      `Authentication status: OK (Local Mode)
+
+Mode: Local (AppleScript)
+Platform: macOS
+
+Services available:
+- Email (Mail.app)
+- Calendar (Calendar.app)
+- Contacts (Contacts.app)
+- Reminders (Reminders.app)
+- Notes (Notes.app)
+- Messages (Messages.app)
+- Safari (Safari.app)`
+    );
+  }
+
   if (!hasCredentials()) {
     return formatError(new Error('UNAUTHORIZED'));
   }

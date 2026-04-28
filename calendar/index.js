@@ -3,10 +3,11 @@
  * Provides calendar tools via CalDAV
  */
 
-const { listEvents, createEvent, deleteEvent, getCalendars } = require('./caldav-client');
+const config = require('../config');
+const useLocal = config.USE_LOCAL_MODE && config.IS_MACOS;
+const { listEvents, createEvent, deleteEvent, getCalendars } = useLocal ? require('./local-client') : require('./caldav-client');
 const { formatSuccess, formatError, withErrorHandler } = require('../utils/error-handler');
 const { formatDate } = require('../utils/date-utils');
-const config = require('../config');
 
 /**
  * Handler: List events

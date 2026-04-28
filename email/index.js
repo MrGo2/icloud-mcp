@@ -3,11 +3,12 @@
  * Provides email tools via IMAP/SMTP
  */
 
-const { listEmails, readEmail, searchEmails, markAsRead, listFolders } = require('./imap-client');
-const { sendEmail } = require('./smtp-client');
+const config = require('../config');
+const useLocal = config.USE_LOCAL_MODE && config.IS_MACOS;
+const { listEmails, readEmail, searchEmails, markAsRead, listFolders } = useLocal ? require('./local-client') : require('./imap-client');
+const { sendEmail } = useLocal ? require('./local-client') : require('./smtp-client');
 const { formatSuccess, formatError, withErrorHandler } = require('../utils/error-handler');
 const { formatDate, formatRelative } = require('../utils/date-utils');
-const config = require('../config');
 
 /**
  * Handler: List emails
@@ -23,9 +24,10 @@ async function handleListEmails(args) {
   }
 
   const lines = emails.map((email, i) => {
-    const unread = !email.flags.includes('\\Seen') ? '[UNREAD] ' : '';
+    const unread = email.flags ? !email.flags.includes('\\Seen') : !email.read;
     const date = formatRelative(new Date(email.date));
-    return `${i + 1}. ${unread}${email.subject}\n   From: ${email.from}\n   Date: ${date}\n   UID: ${email.uid}`;
+    const id = email.uid || email.id;
+    return `${i + 1}. ${unread ? '[UNREAD] ' : ''}${email.subject}\n   From: ${email.from}\n   Date: ${date}\n   UID: ${id}`;
   });
 
   return formatSuccess(`Emails in ${folder} (${emails.length}):\n\n${lines.join('\n\n')}`);
@@ -42,13 +44,14 @@ async function handleReadEmail(args) {
   const folder = args.folder || 'inbox';
   const email = await readEmail(args.uid, folder);
 
-  let body = email.text || '';
+  let body = email.text || email.body || '';
   if (body.length > config.DEFAULTS.EMAIL_BODY_MAX_LENGTH) {
     body = body.substring(0, config.DEFAULTS.EMAIL_BODY_MAX_LENGTH) + '\n... (truncated)';
   }
 
-  const attachmentInfo = email.attachments.length > 0
-    ? `\n\nAttachments (${email.attachments.length}):\n${email.attachments.map(a => `- ${a.filename} (${a.contentType}, ${Math.round(a.size / 1024)}KB)`).join('\n')}`
+  const attachments = email.attachments || [];
+  const attachmentInfo = attachments.length > 0
+    ? `\n\nAttachments (${attachments.length}):\n${attachments.map(a => `- ${a.filename} (${a.contentType}, ${Math.round(a.size / 1024)}KB)`).join('\n')}`
     : '';
 
   return formatSuccess(
@@ -56,7 +59,7 @@ async function handleReadEmail(args) {
 From: ${email.from}
 To: ${email.to}${email.cc ? `\nCC: ${email.cc}` : ''}
 Date: ${formatDate(email.date)}
-UID: ${email.uid}
+UID: ${email.uid || email.id}
 
 ---
 
@@ -116,9 +119,10 @@ async function handleSearchEmails(args) {
   }
 
   const lines = emails.map((email, i) => {
-    const unread = !email.flags.includes('\\Seen') ? '[UNREAD] ' : '';
+    const unread = email.flags ? !email.flags.includes('\\Seen') : !email.read;
     const date = formatRelative(new Date(email.date));
-    return `${i + 1}. ${unread}${email.subject}\n   From: ${email.from}\n   Date: ${date}\n   UID: ${email.uid}`;
+    const id = email.uid || email.id;
+    return `${i + 1}. ${unread ? '[UNREAD] ' : ''}${email.subject}\n   From: ${email.from}\n   Date: ${date}\n   UID: ${id}`;
   });
 
   return formatSuccess(`Search results in ${folder} (${emails.length}):\n\n${lines.join('\n\n')}`);
