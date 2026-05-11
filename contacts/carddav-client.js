@@ -204,7 +204,9 @@ async function listContacts(count = 25) {
  * Search contacts
  */
 async function searchContacts(query, count = 25) {
-  const allContacts = await listContacts(count * 2);
+  // Bug fix: load ALL contacts before filtering (was only first count*2 = 50 by default,
+  // which missed contacts later in alphabetical order)
+  const allContacts = await listContacts(100000);
   const lowerQuery = query.toLowerCase();
 
   const matches = allContacts.filter(contact => {
