@@ -1,6 +1,17 @@
-# iCloud MCP
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/banner-dark.svg">
+  <img src="assets/banner-light.svg" alt="icloud-mcp — Mail, Calendar, Contacts, Reminders, Notes, Messages and Safari for your AI assistant">
+</picture>
 
-Node.js server implementing Model Context Protocol (MCP) for Apple services.
+<div align="center">
+
+[![CI](https://github.com/MrGo2/icloud-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/MrGo2/icloud-mcp/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/MrGo2/icloud-mcp?style=flat-square&color=8250df)](https://github.com/MrGo2/icloud-mcp/releases/latest)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
+[![Node](https://img.shields.io/badge/node-%E2%89%A520-brightgreen?style=flat-square&logo=node.js&logoColor=white)](package.json)
+[![MCP](https://img.shields.io/badge/MCP-SDK%20v2-a371f7?style=flat-square)](https://modelcontextprotocol.io)
+
+</div>
 
 **The only MCP server that covers seven Apple services with two interchangeable backends.** Run it in **local mode** and it drives the native macOS apps through AppleScript — no credentials, no network, and it reaches Reminders, Notes, Messages and Safari that the iCloud protocols do not expose. Run it in **cloud mode** and it speaks IMAP/SMTP, CalDAV and CardDAV, so it works from any machine, not just a Mac. Switch between them at runtime with `set-mode`; no restart.
 

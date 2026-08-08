@@ -1,0 +1,46 @@
+name: Bug report
+description: Something doesn't work
+labels: [bug]
+body:
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Mode
+      options:
+        - LOCAL (AppleScript)
+        - CLOUD (iCloud protocols)
+        - Both / not sure
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      placeholder: e.g. 26.1 (or N/A for cloud mode on Linux/Windows)
+    validations:
+      required: true
+  - type: input
+    id: client
+    attributes:
+      label: MCP client
+      placeholder: e.g. Claude Desktop 1.x, Claude Code, VS Code
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: The tool you called, the arguments, and the error you got. Please redact any personal data (emails, contact names, message content).
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I granted the Automation permissions in System Settings > Privacy & Security (local mode)
+        - label: I checked the Permissions & Troubleshooting section of the README
