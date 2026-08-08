@@ -21,7 +21,8 @@
     "safari/",
     "utils/",
     "LICENSE",
-    "README.md"
+    "README.md",
+    "DISCLOSURE"
   ],
   "scripts": {
     "start": "node index.js",
@@ -68,5 +69,8 @@
     "nodemailer": "^6.9.14",
     "tsdav": "^2.1.1",
     "zod": "^4.4.3"
+  },
+  "contentPolicy": {
+    "class": "dual-use"
   }
 }

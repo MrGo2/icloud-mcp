@@ -1,0 +1,35 @@
+Dual-use disclosure for mcp-icloud
+===================================
+
+mcp-icloud is a Model Context Protocol (MCP) server that lets an AI assistant
+(e.g. Claude Desktop) operate the USER'S OWN Apple services on the USER'S OWN
+machine, at the user's request. It is the Apple-services equivalent of the
+official MCP reference servers (filesystem, github, etc.).
+
+Why this package can look like malware to automated scanning
+------------------------------------------------------------
+- It reads and sends email, reads contacts, calendars, reminders, notes and
+  iMessage conversations, and controls Safari — via AppleScript (local mode)
+  or the user's iCloud account over IMAP/CalDAV/CardDAV (cloud mode).
+- It executes osascript as a child process to drive macOS applications.
+- Cloud mode authenticates with an app-specific password supplied by the user.
+
+Why this is legitimate dual-use functionality
+---------------------------------------------
+- The server only runs when the user installs and starts it, and only talks
+  over stdio to the MCP client the user connected it to. There is no network
+  listener, no telemetry, no analytics, and no data leaves the machine except
+  toward Apple's own servers (iCloud) on the user's behalf.
+- On macOS, every application the server touches triggers the operating
+  system's TCC consent prompts (System Settings > Privacy & Security >
+  Automation); nothing is accessible until the user grants it.
+- Credentials are supplied by the user via a local .env file or the MCP
+  bundle's OS credential store, are read once at startup, and are never
+  logged. Every tool input is schema-validated (zod) before execution, and
+  values interpolated into AppleScript are coerced and escaped.
+- Full source: https://github.com/MrGo2/icloud-mcp (MIT license, tests and
+  CI public).
+
+Intended users: individuals connecting an AI assistant to their own Apple
+account and macOS applications. The package provides no capability against
+third parties that the operating system's own consent model does not gate.
