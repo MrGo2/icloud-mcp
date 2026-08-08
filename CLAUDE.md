@@ -6,8 +6,8 @@ This MCP server provides Claude with access to Apple services via two modes:
 
 | Mode | Description | Services | Requirements |
 |------|-------------|----------|--------------|
-| **LOCAL** (default) | AppleScript access to macOS apps | 7 services, 35 tools | macOS |
-| **CLOUD** | iCloud protocols (IMAP, CalDAV, CardDAV) | 3 services, 35 tools* | App-specific password |
+| **LOCAL** (default) | AppleScript access to macOS apps | 7 services, 40 tools | macOS |
+| **CLOUD** | iCloud protocols (IMAP, CalDAV, CardDAV) | 3 services, 40 tools* | App-specific password |
 
 \* In CLOUD mode, local-only tools (Reminders, Notes, Messages, Safari) return an error when called.
 
@@ -23,13 +23,18 @@ Use `set-mode` to switch between modes **without restarting**:
 
 | Service | Protocol | Tools |
 |---------|----------|-------|
-| **Email** | Mail.app (AppleScript) | 6 |
-| **Calendar** | Calendar.app (AppleScript) | 5 |
-| **Contacts** | Contacts.app (AppleScript) | 5 |
+| **Email** | IMAP/SMTP (not yet local) | 6 |
+| **Calendar** | CalDAV (not yet local) | 4 |
+| **Contacts** | Contacts.app (AppleScript) | 7 |
 | **Reminders** | Reminders.app (AppleScript) | 7 |
 | **Notes** | Notes.app (AppleScript) | 5 |
-| **Messages** | Messages.app (AppleScript) | 1 |
+| **Messages** | Messages.app + `imsg` CLI | 4 |
 | **Safari** | Safari.app (AppleScript) | 4 |
+
+> **Known gap:** `email/index.js` and `calendar/index.js` import their cloud
+> clients directly and do no mode routing, so `email/local-client.js` and
+> `calendar/local-client.js` are currently unreachable. Both services need
+> credentials even in LOCAL mode.
 
 ### Cloud Mode
 
@@ -95,12 +100,13 @@ icloud-mcp/
 │   ├── local-client.js
 │   └── index.js
 └── utils/
-    ├── applescript.js    # AppleScript executor
+    ├── applescript.js    # AppleScript executor + arg coercion
+    ├── validate.js       # Validates tool args against inputSchema
     ├── date-utils.js
     └── error-handler.js
 ```
 
-## Tools (35 total)
+## Tools (40 total)
 
 ### Auth (3)
 - `about` - Server information
@@ -115,19 +121,20 @@ icloud-mcp/
 - `mark-as-read` - Mark read/unread
 - `list-folders` - List mail folders
 
-### Calendar (5)
+### Calendar (4)
 - `list-events` - List upcoming events
 - `list-calendars` - List calendars
 - `create-event` - Create event
-- `update-event` - Update event
 - `delete-event` - Delete event
 
-### Contacts (5)
+### Contacts (7)
 - `list-contacts` - List contacts
 - `search-contacts` - Search contacts
 - `read-contact` - Get contact details
 - `create-contact` - Create contact
 - `delete-contact` - Delete contact
+- `list-contact-accounts` - List accounts (local only)
+- `list-contact-groups` - List groups (local only)
 
 ### Reminders (7) - Local only
 - `list-reminder-lists` - List reminder lists
@@ -145,8 +152,14 @@ icloud-mcp/
 - `create-note` - Create note
 - `search-notes` - Search notes
 
-### Messages (1) - Local only
+### Messages (4) - Local only
+- `list-chats` - List recent conversations
+- `read-messages` - Read a conversation's history
 - `send-message` - Send iMessage/SMS
+- `react-message` - Send a tapback reaction
+
+Reading needs the `imsg` CLI. It is looked up via `ICLOUD_MCP_IMSG_PATH`, then
+the Homebrew prefixes, then `PATH`.
 
 ### Safari (4) - Local only
 - `list-safari-tabs` - List open tabs
@@ -173,5 +186,5 @@ Grant access in **System Settings > Privacy & Security > Automation**.
 |---------|--------|--------|
 | iCloud Drive | ❌ | Requires CloudKit |
 | Find My | ❌ | Internal API only |
-| Read Messages | ❌ | macOS limitation |
+| Read Messages | ✅ | Via `imsg` CLI (needs Full Disk Access) |
 | Edit Notes | ⚠️ Limited | AppleScript limitation |

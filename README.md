@@ -33,15 +33,18 @@ This MCP server enables Claude to interact with your Apple services in two modes
 ### Local Mode (Default) - macOS Only
 Uses AppleScript to access native macOS apps. **Faster, works offline, more services.**
 
-| Service | App | Tools |
-|---------|-----|-------|
-| **Email** | Mail.app | 6 |
-| **Calendar** | Calendar.app | 5 |
-| **Contacts** | Contacts.app | 5 |
+| Service | Backend | Tools |
+|---------|---------|-------|
+| **Email** | IMAP / SMTP \* | 6 |
+| **Calendar** | CalDAV \* | 4 |
+| **Contacts** | Contacts.app | 7 |
 | **Reminders** | Reminders.app | 7 |
 | **Notes** | Notes.app | 5 |
-| **Messages** | Messages.app | 1 |
+| **Messages** | Messages.app + `imsg` | 4 |
 | **Safari** | Safari.app | 4 |
+
+\* Email and Calendar still use the iCloud protocols in both modes and need
+credentials. Their AppleScript clients exist but are not wired up yet.
 
 ### Cloud Mode - Works Anywhere
 Uses iCloud protocols (IMAP, CalDAV, CardDAV). Requires app-specific password.
@@ -56,7 +59,7 @@ Uses iCloud protocols (IMAP, CalDAV, CardDAV). Requires app-specific password.
 
 ## Features
 
-- **31 Tools** in local mode (17 in cloud mode)
+- **40 Tools** across 7 services (local-only tools return an error in cloud mode)
 - **Dual Mode** - switch between local (fast) and cloud (remote access)
 - **7 Services** - Email, Calendar, Contacts, Reminders, Notes, Messages, Safari
 - **Secure Authentication** - AppleScript permissions or app-specific passwords
@@ -125,12 +128,13 @@ Add to your Claude Desktop MCP settings (`~/Library/Application Support/Claude/c
 
 ## Tools
 
-### Authentication (2)
+### Authentication (3)
 
 | Tool | Description |
 |------|-------------|
 | `about` | Server information |
 | `check-auth-status` | Verify credentials |
+| `set-mode` | Switch between LOCAL and CLOUD at runtime |
 
 ### Email (6)
 
@@ -143,25 +147,26 @@ Add to your Claude Desktop MCP settings (`~/Library/Application Support/Claude/c
 | `mark-as-read` | Mark read/unread |
 | `list-folders` | List mail folders |
 
-### Calendar (5)
+### Calendar (4)
 
 | Tool | Description |
 |------|-------------|
 | `list-events` | List upcoming events |
 | `list-calendars` | List all calendars |
 | `create-event` | Create new event |
-| `update-event` | Update existing event |
 | `delete-event` | Delete an event |
 
-### Contacts (5)
+### Contacts (7)
 
 | Tool | Description |
 |------|-------------|
 | `list-contacts` | List contacts |
-| `search-contacts` | Search by name/email |
+| `search-contacts` | Search by name/email/phone |
 | `read-contact` | Get contact details |
 | `create-contact` | Create new contact |
 | `delete-contact` | Delete a contact |
+| `list-contact-accounts` | List accounts (iCloud, Google, ...) - local only |
+| `list-contact-groups` | List contact groups - local only |
 
 ### Reminders (7) - Local Only
 
@@ -185,11 +190,16 @@ Add to your Claude Desktop MCP settings (`~/Library/Application Support/Claude/c
 | `create-note` | Create new note |
 | `search-notes` | Search notes |
 
-### Messages (1) - Local Only
+### Messages (4) - Local Only
+
+Reading requires the [`imsg`](https://github.com/steipete/imsg) CLI and Full Disk Access.
 
 | Tool | Description |
 |------|-------------|
+| `list-chats` | List recent conversations |
+| `read-messages` | Read a conversation's history |
 | `send-message` | Send iMessage/SMS |
+| `react-message` | Send a tapback reaction |
 
 ### Safari (4) - Local Only
 
@@ -206,9 +216,10 @@ Add to your Claude Desktop MCP settings (`~/Library/Application Support/Claude/c
 
 ```
 icloud-mcp/
-├── index.js              # MCP server (mode switching)
+├── index.js              # MCP server (JSON-RPC over stdio)
+├── mode.js               # Runtime mode state
 ├── config.js             # Configuration
-├── auth/                 # Credential management
+├── auth/                 # Credential management + set-mode
 ├── email/
 │   ├── imap-client.js    # Cloud: IMAP
 │   ├── smtp-client.js    # Cloud: SMTP
@@ -271,7 +282,7 @@ icloud-mcp/
 | Works offline | ✅ | ❌ |
 | Remote access | ❌ | ✅ |
 | Services | 7 | 3 |
-| Tools | 31 | 17 |
+| Tools | 40 advertised | 40 advertised, 22 usable |
 | Requirements | macOS | App-specific password |
 
 ---
@@ -280,7 +291,7 @@ icloud-mcp/
 
 | Feature | Status | Reason |
 |---------|--------|--------|
-| Read Messages | ❌ | macOS security limitation |
+| Read Messages | ✅ | Via the `imsg` CLI (needs Full Disk Access) |
 | Edit Notes | ⚠️ Limited | AppleScript limitation |
 | iCloud Drive | ❌ | Requires CloudKit |
 | Find My | ❌ | Internal API only |
