@@ -1,17 +1,33 @@
 {
   "name": "icloud-mcp",
   "version": "2.0.0",
-  "description": "MCP server for iCloud services (Email, Calendar, Contacts)",
+  "description": "MCP server for Apple services: Email, Calendar, Contacts, Reminders, Notes, Messages and Safari, via macOS apps (local) or iCloud protocols (cloud)",
   "main": "index.js",
+  "bin": {
+    "icloud-mcp": "index.js"
+  },
   "scripts": {
     "start": "node index.js",
     "test-mode": "USE_TEST_MODE=true node index.js",
-    "inspect": "npx @anthropics/inspector node index.js"
+    "inspect": "npx @modelcontextprotocol/inspector node index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MrGo2/icloud-mcp.git"
+  },
+  "homepage": "https://github.com/MrGo2/icloud-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/MrGo2/icloud-mcp/issues"
+  },
+  "engines": {
+    "node": ">=18"
   },
   "keywords": [
     "mcp",
+    "modelcontextprotocol",
     "icloud",
     "apple",
+    "applescript",
     "email",
     "calendar",
     "contacts"
