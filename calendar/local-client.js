@@ -29,7 +29,15 @@ async function listEvents(count = 25, daysAhead = 30) {
 
     for (let i = 0; i < calNames.length; i++) {
       try {
-        const evts = cals[i].events;
+        // Filter the window app-side: reading every property of every event
+        // of every calendar transfers whole subscribed-calendar histories
+        // and hangs on real accounts.
+        const evts = cals[i].events.whose({
+          _and: [
+            { startDate: { _greaterThan: rangeStart } },
+            { startDate: { _lessThan: rangeEnd } }
+          ]
+        });
         const uids = evts.uid();
         const summaries = evts.summary();
         const starts = evts.startDate();

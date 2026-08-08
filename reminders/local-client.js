@@ -10,29 +10,18 @@ const { runAppleScript, runJXA, escapeAppleScript, escapeJXA, asInt, asBool, for
  * @returns {Promise<Array>} - List of reminder lists
  */
 async function listReminderLists() {
+  // Names and ids only, fetched as two batch calls. Counting reminders per
+  // list forces one Apple Event round-trip per reminder over the full
+  // history (completed included) and hangs for minutes on a real database.
   const script = `
     const reminders = Application('Reminders');
-    const lists = reminders.lists();
+    const lists = reminders.lists;
+    const names = lists.name();
+    const ids = lists.id();
     let result = [];
 
-    for (let i = 0; i < lists.length; i++) {
-      const list = lists[i];
-      let totalCount = 0;
-      let incompleteCount = 0;
-      try {
-        const rems = list.reminders();
-        totalCount = rems.length;
-        for (let j = 0; j < rems.length; j++) {
-          if (!rems[j].completed()) incompleteCount++;
-        }
-      } catch (e) {}
-
-      result.push({
-        id: list.id(),
-        name: list.name(),
-        totalCount: totalCount,
-        incompleteCount: incompleteCount
-      });
+    for (let i = 0; i < names.length; i++) {
+      result.push({ id: ids[i], name: names[i] });
     }
 
     JSON.stringify(result);
