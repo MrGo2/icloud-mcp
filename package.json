@@ -72,5 +72,10 @@
   },
   "contentPolicy": {
     "class": "dual-use"
+  },
+  "pnpm": {
+    "overrides": {
+      "semver": "7.5.2"
+    }
   }
 }
