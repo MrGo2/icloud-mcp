@@ -8,9 +8,10 @@
   },
   "scripts": {
     "start": "node index.js",
-    "test": "node test/security.test.js",
+    "test": "node test/security.test.js && node test/local-output.test.js",
     "test-mode": "USE_TEST_MODE=true node index.js",
-    "inspect": "npx @modelcontextprotocol/inspector node index.js"
+    "inspect": "npx @modelcontextprotocol/inspector node index.js",
+    "test:local": "node test/local-output.test.js"
   },
   "repository": {
     "type": "git",
