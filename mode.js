@@ -10,6 +10,20 @@ const config = require('./config');
 // Initial mode based on config
 let currentMode = (config.USE_LOCAL_MODE && config.IS_MACOS) ? 'local' : 'cloud';
 
+// Listeners notified after a successful mode change. The server uses this to
+// emit notifications/tools/list_changed, since the mode decides which tools work.
+const listeners = new Set();
+
+/**
+ * Subscribe to mode changes.
+ * @param {() => void} fn
+ * @returns {() => void} - Unsubscribe
+ */
+function onModeChange(fn) {
+  listeners.add(fn);
+  return () => listeners.delete(fn);
+}
+
 /**
  * Get current mode
  * @returns {'local' | 'cloud'}
@@ -33,6 +47,14 @@ function setMode(mode) {
 
   currentMode = mode;
   console.error(`[icloud-mcp] Mode changed to: ${mode}`);
+
+  for (const fn of listeners) {
+    try {
+      fn(mode);
+    } catch (error) {
+      console.error('[icloud-mcp] Mode listener failed:', error.message);
+    }
+  }
 }
 
 /**
@@ -55,5 +77,6 @@ module.exports = {
   getMode,
   setMode,
   isLocalMode,
-  isCloudMode
+  isCloudMode,
+  onModeChange
 };

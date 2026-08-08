@@ -21,7 +21,7 @@
     "url": "https://github.com/MrGo2/icloud-mcp/issues"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "keywords": [
     "mcp",
@@ -36,11 +36,13 @@
   "author": "Carlos Lorenzo",
   "license": "MIT",
   "dependencies": {
+    "@modelcontextprotocol/server": "2.0.0",
     "dotenv": "^16.4.5",
+    "ical.js": "^2.1.0",
     "imap": "^0.8.19",
     "mailparser": "^3.7.1",
     "nodemailer": "^6.9.14",
     "tsdav": "^2.1.1",
-    "ical.js": "^2.1.0"
+    "zod": "^4.4.3"
   }
 }

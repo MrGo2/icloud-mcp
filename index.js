@@ -17,10 +17,11 @@
  * - CLOUD: Uses iCloud protocols (IMAP, CalDAV, CardDAV) - works from anywhere
  */
 
-const readline = require('readline');
+const { McpServer } = require('@modelcontextprotocol/server');
+const { serveStdio } = require('@modelcontextprotocol/server/stdio');
+
 const config = require('./config');
-const { getMode } = require('./mode');
-const { validateArgs } = require('./utils/validate');
+const { getMode, onModeChange } = require('./mode');
 
 // Import all modules - tools are always available, handlers check mode
 const { authTools } = require('./auth');
@@ -44,192 +45,79 @@ const TOOLS = [
   ...safariTools
 ];
 
-// Server info - mode is dynamic
-function getServerInfo() {
-  return {
-    name: 'icloud-mcp',
-    version: '2.0.0',
-    description: `MCP server for Apple services (Mode: ${getMode().toUpperCase()})`
-  };
-}
-
 /**
- * Handle MCP JSON-RPC request
+ * Build a server instance with every tool registered.
+ *
+ * serveStdio takes a factory rather than an instance: the opening exchange
+ * decides the protocol era and pins one instance for the connection, so the
+ * same registrations have to be reproducible on demand.
  */
-async function handleRequest(request) {
-  const { method, params, id } = request;
+function buildServer() {
+  const server = new McpServer(
+    {
+      name: 'icloud-mcp',
+      version: '2.0.0',
+      title: 'iCloud MCP'
+    },
+    {
+      capabilities: { tools: { listChanged: true } },
+      instructions: `Access to Apple services in two modes.
 
-  // Notifications carry no id and MUST NOT be answered at all.
-  if (typeof method === 'string' && method.startsWith('notifications/')) {
-    return null;
-  }
+LOCAL (default, macOS only) drives the native apps via AppleScript.
+CLOUD uses the iCloud protocols and needs an app-specific password.
 
-  try {
-    switch (method) {
-      case 'initialize':
-        return {
-          jsonrpc: '2.0',
-          id,
-          result: {
-            protocolVersion: '2024-11-05',
-            serverInfo: getServerInfo(),
-            capabilities: {
-              tools: {}
-            }
-          }
-        };
-
-      case 'ping':
-        return { jsonrpc: '2.0', id, result: {} };
-
-      case 'tools/list':
-        return {
-          jsonrpc: '2.0',
-          id,
-          result: {
-            tools: TOOLS.map(tool => ({
-              name: tool.name,
-              description: tool.description,
-              inputSchema: tool.inputSchema
-            }))
-          }
-        };
-
-      case 'tools/call': {
-        const toolName = params?.name;
-        const toolArgs = params?.arguments || {};
-
-        const tool = TOOLS.find(t => t.name === toolName);
-        if (!tool) {
-          return {
-            jsonrpc: '2.0',
-            id,
-            error: {
-              code: -32602,
-              message: `Unknown tool: ${toolName}`
-            }
-          };
-        }
-
-        console.error(`[icloud-mcp] Calling tool: ${toolName}`);
-
-        // Tool failures are reported in the result with isError, not as a
-        // protocol error: the model needs to see them and can retry.
-        try {
-          const args = validateArgs(toolName, tool.inputSchema, toolArgs);
-          const result = await tool.handler(args);
-          return { jsonrpc: '2.0', id, result };
-        } catch (error) {
-          console.error(`[icloud-mcp] Tool ${toolName} failed:`, error.message);
-          return {
-            jsonrpc: '2.0',
-            id,
-            result: {
-              content: [{ type: 'text', text: `Error: ${error.message}` }],
-              isError: true
-            }
-          };
-        }
-      }
-
-      default:
-        return {
-          jsonrpc: '2.0',
-          id,
-          error: {
-            code: -32601,
-            message: `Unknown method: ${method}`
-          }
-        };
+Reminders, Notes, Messages and Safari are LOCAL only: calling them in CLOUD
+mode returns an error. Use set-mode to switch without restarting.`
     }
-  } catch (error) {
-    console.error(`[icloud-mcp] Error handling ${method}:`, error.message);
-    return {
-      jsonrpc: '2.0',
-      id,
-      error: {
-        code: -32603,
-        message: error.message
-      }
-    };
+  );
+
+  for (const tool of TOOLS) {
+    server.registerTool(
+      tool.name,
+      {
+        title: tool.title,
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+        ...(tool.outputSchema ? { outputSchema: tool.outputSchema } : {}),
+        ...(tool.annotations ? { annotations: tool.annotations } : {})
+      },
+      tool.handler
+    );
   }
+
+  // set-mode changes which tools actually work, so tell the client to re-read
+  // the list. Failures here are cosmetic - never take the connection down.
+  onModeChange(() => {
+    Promise.resolve(server.sendToolListChanged()).catch(() => {});
+  });
+
+  return server;
 }
 
-/**
- * Start the MCP server
- */
-function startServer() {
-  const initialMode = getMode();
+console.error('[icloud-mcp] Starting iCloud MCP server v2.0.0...');
+console.error(`[icloud-mcp] Initial mode: ${getMode().toUpperCase()}`);
+console.error(`[icloud-mcp] Tools available: ${TOOLS.length}`);
 
-  console.error('[icloud-mcp] Starting iCloud MCP server v2.0.0...');
-  console.error(`[icloud-mcp] Initial mode: ${initialMode.toUpperCase()}`);
-  console.error(`[icloud-mcp] Tools available: ${TOOLS.length}`);
-  console.error('[icloud-mcp] Mode switching: Use set-mode tool to change modes at runtime');
-
-  if (initialMode === 'local') {
-    console.error('[icloud-mcp] Services: Email, Calendar, Contacts, Reminders, Notes, Messages, Safari');
-  } else {
-    console.error('[icloud-mcp] Services: Email, Calendar, Contacts');
-    console.error(`[icloud-mcp] Credentials configured: ${!!(config.ICLOUD_EMAIL && config.ICLOUD_APP_PASSWORD)}`);
-  }
-
-  if (config.USE_TEST_MODE) {
-    console.error('[icloud-mcp] TEST MODE ENABLED');
-  }
-
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-    terminal: false
-  });
-
-  // MCP stdio framing is one complete JSON message per line, so each line is
-  // parsed on its own. A malformed line is dropped rather than accumulated -
-  // buffering it would poison every request that followed.
-  rl.on('line', async (line) => {
-    const trimmed = line.trim();
-    if (!trimmed) return;
-
-    let request;
-    try {
-      request = JSON.parse(trimmed);
-    } catch (e) {
-      console.error('[icloud-mcp] Ignoring malformed JSON line:', e.message);
-      return;
-    }
-
-    try {
-      const response = await handleRequest(request);
-      if (response) {
-        process.stdout.write(JSON.stringify(response) + '\n');
-      }
-    } catch (e) {
-      console.error('[icloud-mcp] Unhandled error:', e.message);
-      if (request.id !== undefined) {
-        process.stdout.write(JSON.stringify({
-          jsonrpc: '2.0',
-          id: request.id,
-          error: { code: -32603, message: e.message }
-        }) + '\n');
-      }
-    }
-  });
-
-  rl.on('close', () => {
-    console.error('[icloud-mcp] Server shutting down');
-    process.exit(0);
-  });
-
-  process.on('SIGINT', () => {
-    console.error('[icloud-mcp] Received SIGINT, shutting down');
-    process.exit(0);
-  });
-
-  process.on('SIGTERM', () => {
-    console.error('[icloud-mcp] Received SIGTERM, shutting down');
-    process.exit(0);
-  });
+if (getMode() === 'local') {
+  console.error('[icloud-mcp] Services: Email, Calendar, Contacts, Reminders, Notes, Messages, Safari');
+} else {
+  console.error('[icloud-mcp] Services: Email, Calendar, Contacts');
+  console.error(`[icloud-mcp] Credentials configured: ${!!(config.ICLOUD_EMAIL && config.ICLOUD_APP_PASSWORD)}`);
 }
 
-// Start the server
-startServer();
+if (config.USE_TEST_MODE) {
+  console.error('[icloud-mcp] TEST MODE ENABLED');
+}
+
+// serveStdio returns a handle (not a promise); it owns the transport lifetime.
+const handle = serveStdio(buildServer);
+
+function shutdown(signal) {
+  console.error(`[icloud-mcp] Received ${signal}, shutting down`);
+  Promise.resolve(handle?.close?.())
+    .catch(() => {})
+    .finally(() => process.exit(0));
+}
+
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));
