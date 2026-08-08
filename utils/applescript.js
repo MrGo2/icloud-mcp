@@ -127,6 +127,36 @@ function escapeJXA(str) {
 }
 
 /**
+ * Coerce a value that gets interpolated into script source as a bare number.
+ * Anything non-numeric would be injected as raw AppleScript/JXA, so reject it.
+ * @param {*} value - Value to coerce
+ * @param {number} fallback - Used when value is null/undefined
+ * @returns {number} - A finite integer
+ */
+function asInt(value, fallback = 0) {
+  if (value === undefined || value === null || value === '') return Math.trunc(fallback);
+  const n = Number(value);
+  if (!Number.isFinite(n)) {
+    throw new Error(`Expected a number, got: ${JSON.stringify(value)}`);
+  }
+  return Math.trunc(n);
+}
+
+/**
+ * Coerce a value that gets interpolated into script source as a bare boolean.
+ * @param {*} value - Value to coerce
+ * @param {boolean} fallback - Used when value is null/undefined
+ * @returns {boolean}
+ */
+function asBool(value, fallback = false) {
+  if (value === undefined || value === null || value === '') return fallback;
+  if (typeof value === 'boolean') return value;
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  throw new Error(`Expected a boolean, got: ${JSON.stringify(value)}`);
+}
+
+/**
  * Format date for AppleScript
  * @param {Date|string} date - Date to format
  * @returns {string} - AppleScript date string
@@ -177,6 +207,8 @@ module.exports = {
   runJXAWithJSON,
   escapeAppleScript,
   escapeJXA,
+  asInt,
+  asBool,
   formatAppleScriptDate,
   AppleScriptError
 };

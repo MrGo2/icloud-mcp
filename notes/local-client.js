@@ -3,7 +3,7 @@
  * Accesses Notes.app via AppleScript
  */
 
-const { runAppleScript, runJXA, escapeAppleScript, escapeJXA } = require('../utils/applescript');
+const { runAppleScript, runJXA, escapeAppleScript, escapeJXA, asInt } = require('../utils/applescript');
 
 /**
  * List note folders
@@ -75,7 +75,7 @@ async function listNotes(folderName = null, count = 25) {
 
     // Sort by modification date (newest first)
     allNotes.sort((a, b) => new Date(b.modificationDate) - new Date(a.modificationDate));
-    JSON.stringify(allNotes.slice(0, ${count}));
+    JSON.stringify(allNotes.slice(0, ${asInt(count, 25)}));
   `;
 
   const result = await runJXA(script);
@@ -128,8 +128,11 @@ async function readNote(noteId) {
  * @returns {Promise<Object>} - Created note info
  */
 async function createNote({ title, body, folderName = 'Notes' }) {
-  // Notes uses HTML body, but we can pass plain text
-  const htmlBody = `<h1>${escapeAppleScript(title)}</h1><br>${escapeAppleScript(body || '').replace(/\n/g, '<br>')}`;
+  // Notes uses an HTML body. Split on real newlines BEFORE escaping: escaping
+  // turns a newline into the two characters \ and n, so a replace afterwards
+  // would find nothing and the note would render with literal \n in it.
+  const htmlLines = String(body || '').split('\n').map(escapeAppleScript).join('<br>');
+  const htmlBody = `<h1>${escapeAppleScript(title)}</h1><br>${htmlLines}`;
 
   const script = `
     tell application "Notes"
@@ -152,6 +155,7 @@ async function createNote({ title, body, folderName = 'Notes' }) {
  */
 async function searchNotes(query, count = 25) {
   const searchTerm = escapeJXA(query.toLowerCase());
+  const limit = asInt(count, 25);
 
   const script = `
     const notes = Application('Notes');
@@ -159,12 +163,12 @@ async function searchNotes(query, count = 25) {
     let results = [];
 
     for (let folder of folders) {
-      if (results.length >= ${count}) break;
+      if (results.length >= ${limit}) break;
 
       try {
         const notesList = folder.notes();
         for (let note of notesList) {
-          if (results.length >= ${count}) break;
+          if (results.length >= ${limit}) break;
 
           const name = (note.name() || '').toLowerCase();
           const plaintext = (note.plaintext() || '').toLowerCase();

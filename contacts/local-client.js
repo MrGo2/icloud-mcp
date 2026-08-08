@@ -3,7 +3,7 @@
  * Accesses Contacts.app via AppleScript
  */
 
-const { runAppleScript, runJXA, escapeAppleScript, escapeJXA } = require('../utils/applescript');
+const { runAppleScript, runJXA, escapeAppleScript, escapeJXA, asInt } = require('../utils/applescript');
 const config = require('../config');
 
 /**
@@ -17,7 +17,7 @@ async function listContacts(count = 25) {
     const people = contacts.people();
     let result = [];
 
-    const limit = Math.min(${count}, people.length);
+    const limit = Math.min(${asInt(count, 25)}, people.length);
     for (let i = 0; i < limit; i++) {
       const person = people[i];
       try {
@@ -66,7 +66,7 @@ async function searchContacts(query, count = 25) {
     let result = [];
 
     for (let person of people) {
-      if (result.length >= ${count}) break;
+      if (result.length >= ${asInt(count, 25)}) break;
 
       try {
         const name = (person.name() || '').toLowerCase();

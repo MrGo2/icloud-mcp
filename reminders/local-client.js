@@ -3,7 +3,7 @@
  * Accesses Reminders.app via AppleScript
  */
 
-const { runAppleScript, runJXA, escapeAppleScript, escapeJXA, formatAppleScriptDate } = require('../utils/applescript');
+const { runAppleScript, runJXA, escapeAppleScript, escapeJXA, asInt, asBool, formatAppleScriptDate } = require('../utils/applescript');
 
 /**
  * List all reminder lists
@@ -50,10 +50,12 @@ async function listReminderLists() {
  * @returns {Promise<Array>} - List of reminders
  */
 async function listReminders(listName = null, includeCompleted = false, count = 50) {
+  const limit = asInt(count, 50);
+
   const script = `
     const reminders = Application('Reminders');
     let allReminders = [];
-    const includeCompleted = ${includeCompleted};
+    const includeCompleted = ${asBool(includeCompleted)};
     const targetListName = ${listName ? `"${escapeJXA(listName)}"` : 'null'};
 
     const lists = reminders.lists();
@@ -92,7 +94,7 @@ async function listReminders(listName = null, includeCompleted = false, count = 
       return new Date(a.dueDate) - new Date(b.dueDate);
     });
 
-    JSON.stringify(allReminders.slice(0, ${count}));
+    JSON.stringify(allReminders.slice(0, ${limit}));
   `;
 
   const result = await runJXA(script);
@@ -108,7 +110,7 @@ async function createReminder({ name, body, dueDate, listName = 'Reminders', pri
   let properties = [`name:"${escapeAppleScript(name)}"`];
 
   if (body) properties.push(`body:"${escapeAppleScript(body)}"`);
-  if (priority) properties.push(`priority:${priority}`);
+  if (priority) properties.push(`priority:${asInt(priority, 0)}`);
 
   let script = `
     tell application "Reminders"
@@ -143,7 +145,7 @@ async function updateReminder(reminderId, { name, body, dueDate, priority }) {
 
   if (name) updateCommands.push(`set name of theReminder to "${escapeAppleScript(name)}"`);
   if (body !== undefined) updateCommands.push(`set body of theReminder to "${escapeAppleScript(body || '')}"`);
-  if (priority !== undefined) updateCommands.push(`set priority of theReminder to ${priority}`);
+  if (priority !== undefined) updateCommands.push(`set priority of theReminder to ${asInt(priority, 0)}`);
   if (dueDate) updateCommands.push(`set due date of theReminder to date "${formatAppleScriptDate(new Date(dueDate))}"`);
   if (dueDate === null) updateCommands.push(`set due date of theReminder to missing value`);
 
@@ -181,7 +183,7 @@ async function completeReminder(reminderId, completed = true) {
       repeat with theList in allLists
         try
           set theReminder to reminder id "${escapeAppleScript(reminderId)}" of theList
-          set completed of theReminder to ${completed}
+          set completed of theReminder to ${asBool(completed, true)}
           return "done"
         end try
       end repeat
@@ -231,6 +233,7 @@ async function deleteReminder(reminderId) {
  */
 async function searchReminders(query, count = 25) {
   const searchTerm = escapeJXA(query.toLowerCase());
+  const limit = asInt(count, 25);
 
   const script = `
     const reminders = Application('Reminders');
@@ -240,7 +243,7 @@ async function searchReminders(query, count = 25) {
     for (let list of lists) {
       const rems = list.reminders();
       for (let r of rems) {
-        if (results.length >= ${count}) break;
+        if (results.length >= ${limit}) break;
 
         const name = (r.name() || '').toLowerCase();
         const body = (r.body() || '').toLowerCase();

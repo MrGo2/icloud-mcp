@@ -3,7 +3,7 @@
  * Accesses Mail.app via AppleScript
  */
 
-const { runAppleScript, runJXA, escapeAppleScript, escapeJXA } = require('../utils/applescript');
+const { runAppleScript, runJXA, escapeAppleScript, escapeJXA, asInt, asBool } = require('../utils/applescript');
 const config = require('../config');
 
 /**
@@ -25,7 +25,7 @@ async function listEmails(folder = 'inbox', count = 25) {
       try {
         const mailbox = account.mailboxes.byName('${escapeJXA(mailboxName)}');
         const messages = mailbox.messages();
-        const limit = Math.min(${count}, messages.length);
+        const limit = Math.min(${asInt(count, 25)}, messages.length);
 
         for (let i = 0; i < limit; i++) {
           const msg = messages[i];
@@ -58,7 +58,7 @@ async function listEmails(folder = 'inbox', count = 25) {
 async function readEmail(emailId) {
   const script = `
     const mail = Application('Mail');
-    const msg = mail.messages.byId(${emailId});
+    const msg = mail.messages.byId(${asInt(emailId)});
 
     JSON.stringify({
       id: msg.id(),
@@ -143,7 +143,7 @@ async function searchEmails({ query, from, subject, folder = 'inbox', count = 25
         const mailbox = account.mailboxes.byName('${escapeJXA(mailboxName)}');
         const messages = mailbox.messages();
 
-        for (let i = 0; i < messages.length && emails.length < ${count}; i++) {
+        for (let i = 0; i < messages.length && emails.length < ${asInt(count, 25)}; i++) {
           const msg = messages[i];
           if (${filterCondition}) {
             emails.push({
@@ -175,8 +175,8 @@ async function searchEmails({ query, from, subject, folder = 'inbox', count = 25
 async function markAsRead(emailId, isRead = true) {
   const script = `
     tell application "Mail"
-      set theMessage to message id ${emailId}
-      set read status of theMessage to ${isRead}
+      set theMessage to message id ${asInt(emailId)}
+      set read status of theMessage to ${asBool(isRead, true)}
     end tell
     return "done"
   `;
@@ -221,7 +221,7 @@ async function listFolders() {
 async function deleteEmail(emailId) {
   const script = `
     tell application "Mail"
-      set theMessage to message id ${emailId}
+      set theMessage to message id ${asInt(emailId)}
       delete theMessage
     end tell
     return "deleted"

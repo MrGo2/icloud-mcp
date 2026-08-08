@@ -3,7 +3,7 @@
  * Accesses Safari.app via AppleScript
  */
 
-const { runAppleScript, runJXA, escapeAppleScript, escapeJXA } = require('../utils/applescript');
+const { runAppleScript, runJXA, escapeAppleScript, escapeJXA, asInt } = require('../utils/applescript');
 
 /**
  * List all open tabs across all windows
@@ -106,11 +106,11 @@ async function openUrl(url, inNewWindow = false) {
  * @returns {Promise<Object>} - Result
  */
 async function closeTab(windowIndex = 0, tabIndex = null) {
-  if (tabIndex !== null) {
+  if (tabIndex !== null && tabIndex !== undefined) {
     const script = `
       tell application "Safari"
-        tell window ${windowIndex + 1}
-          close tab ${tabIndex + 1}
+        tell window ${asInt(windowIndex, 0) + 1}
+          close tab ${asInt(tabIndex, 0) + 1}
         end tell
       end tell
       return "closed"
