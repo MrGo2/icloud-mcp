@@ -5,7 +5,7 @@
  */
 
 const localClient = require('./local-client');
-const { handleError, formatError } = require('../utils/error-handler');
+const { formatError } = require('../utils/error-handler');
 const { isLocalMode } = require('../mode');
 
 function requireLocalMode(toolName) {
@@ -37,7 +37,7 @@ const notesTools = [
           }]
         };
       } catch (error) {
-        return handleError(error, 'list-note-folders');
+        return formatError(error, 'list-note-folders');
       }
     }
   },
@@ -71,7 +71,7 @@ const notesTools = [
           }]
         };
       } catch (error) {
-        return handleError(error, 'list-notes');
+        return formatError(error, 'list-notes');
       }
     }
   },
@@ -109,7 +109,7 @@ const notesTools = [
           }]
         };
       } catch (error) {
-        return handleError(error, 'read-note');
+        return formatError(error, 'read-note');
       }
     }
   },
@@ -147,7 +147,7 @@ const notesTools = [
           }]
         };
       } catch (error) {
-        return handleError(error, 'create-note');
+        return formatError(error, 'create-note');
       }
     }
   },
@@ -181,7 +181,7 @@ const notesTools = [
           }]
         };
       } catch (error) {
-        return handleError(error, 'search-notes');
+        return formatError(error, 'search-notes');
       }
     }
   }

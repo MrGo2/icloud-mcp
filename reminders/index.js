@@ -5,7 +5,7 @@
  */
 
 const localClient = require('./local-client');
-const { handleError, formatError } = require('../utils/error-handler');
+const { formatError } = require('../utils/error-handler');
 const { isLocalMode } = require('../mode');
 
 /**
@@ -40,7 +40,7 @@ const remindersTools = [
           }]
         };
       } catch (error) {
-        return handleError(error, 'list-reminder-lists');
+        return formatError(error, 'list-reminder-lists');
       }
     }
   },
@@ -78,7 +78,7 @@ const remindersTools = [
           }]
         };
       } catch (error) {
-        return handleError(error, 'list-reminders');
+        return formatError(error, 'list-reminders');
       }
     }
   },
@@ -124,7 +124,7 @@ const remindersTools = [
           }]
         };
       } catch (error) {
-        return handleError(error, 'create-reminder');
+        return formatError(error, 'create-reminder');
       }
     }
   },
@@ -170,7 +170,7 @@ const remindersTools = [
           }]
         };
       } catch (error) {
-        return handleError(error, 'update-reminder');
+        return formatError(error, 'update-reminder');
       }
     }
   },
@@ -204,7 +204,7 @@ const remindersTools = [
           }]
         };
       } catch (error) {
-        return handleError(error, 'complete-reminder');
+        return formatError(error, 'complete-reminder');
       }
     }
   },
@@ -234,7 +234,7 @@ const remindersTools = [
           }]
         };
       } catch (error) {
-        return handleError(error, 'delete-reminder');
+        return formatError(error, 'delete-reminder');
       }
     }
   },
@@ -268,7 +268,7 @@ const remindersTools = [
           }]
         };
       } catch (error) {
-        return handleError(error, 'search-reminders');
+        return formatError(error, 'search-reminders');
       }
     }
   }

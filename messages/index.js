@@ -5,11 +5,26 @@
  */
 
 const localClient = require('./local-client');
-const { handleError, formatError } = require('../utils/error-handler');
+const { formatError, formatSuccess, withErrorHandler } = require('../utils/error-handler');
 const { isLocalMode } = require('../mode');
 const { execFileSync } = require('child_process');
+const fs = require('fs');
 
-const IMSG_PATH = '/opt/homebrew/bin/imsg';
+// Homebrew's prefix differs between Apple Silicon and Intel, and an MCP server
+// launched by a GUI client often has a minimal PATH, so probe both.
+const IMSG_CANDIDATES = [
+  process.env.ICLOUD_MCP_IMSG_PATH,
+  '/opt/homebrew/bin/imsg',
+  '/usr/local/bin/imsg'
+].filter(Boolean);
+
+function resolveImsg() {
+  for (const candidate of IMSG_CANDIDATES) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  // Last resort: let the OS search PATH.
+  return 'imsg';
+}
 
 function requireLocalMode(toolName) {
   if (!isLocalMode()) {
@@ -19,21 +34,31 @@ function requireLocalMode(toolName) {
 }
 
 function runImsg(args) {
+  let output;
   try {
-    const output = execFileSync(IMSG_PATH, args, { timeout: 15000, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
-    try {
-      return JSON.parse(output);
-    } catch {
-      // imsg outputs JSONL (one JSON object per line)
-      const lines = output.trim().split('\n').filter(Boolean);
-      const parsed = lines.map(l => { try { return JSON.parse(l); } catch { return { raw: l }; } });
-      return parsed.length === 1 ? parsed[0] : parsed;
-    }
+    output = execFileSync(resolveImsg(), args, {
+      timeout: 15000,
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe']
+    });
   } catch (error) {
-    if (error.message && error.message.includes('permissionDenied')) {
-      return { error: 'Full Disk Access required. Grant it to the terminal in System Settings > Privacy > Full Disk Access.' };
+    const detail = (error.stderr || error.message || '').toString();
+    if (detail.includes('permissionDenied')) {
+      throw new Error('Full Disk Access required. Grant it to the terminal in System Settings > Privacy & Security > Full Disk Access.');
     }
-    return { error: error.stderr || error.message };
+    if (error.code === 'ENOENT') {
+      throw new Error('The imsg CLI was not found. Install it (brew install imsg) or set ICLOUD_MCP_IMSG_PATH.');
+    }
+    throw new Error(detail.trim() || 'imsg failed');
+  }
+
+  try {
+    return JSON.parse(output);
+  } catch {
+    // imsg outputs JSONL (one JSON object per line)
+    const lines = output.trim().split('\n').filter(Boolean);
+    const parsed = lines.map(l => { try { return JSON.parse(l); } catch { return { raw: l }; } });
+    return parsed.length === 1 ? parsed[0] : parsed;
   }
 }
 
@@ -47,12 +72,12 @@ const messagesTools = [
         limit: { type: 'number', description: 'Number of conversations to show (default 20)' }
       }
     },
-    handler: async ({ limit = 20 }) => {
+    handler: withErrorHandler(async ({ limit = 20 }) => {
       const modeError = requireLocalMode('list-chats');
       if (modeError) return modeError;
       const result = runImsg(['chats', '--limit', String(limit), '--json']);
-      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
-    }
+      return formatSuccess(JSON.stringify(result, null, 2));
+    }, 'list-chats')
   },
   {
     name: 'read-messages',
@@ -68,7 +93,7 @@ const messagesTools = [
       },
       required: ['chatId']
     },
-    handler: async ({ chatId, limit = 20, start, end, attachments }) => {
+    handler: withErrorHandler(async ({ chatId, limit = 20, start, end, attachments }) => {
       const modeError = requireLocalMode('read-messages');
       if (modeError) return modeError;
       const args = ['history', '--chat-id', String(chatId), '--limit', String(limit), '--json'];
@@ -76,8 +101,8 @@ const messagesTools = [
       if (end) args.push('--end', end);
       if (attachments) args.push('--attachments');
       const result = runImsg(args);
-      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
-    }
+      return formatSuccess(JSON.stringify(result, null, 2));
+    }, 'read-messages')
   },
   {
     name: 'send-message',
@@ -91,24 +116,24 @@ const messagesTools = [
       },
       required: ['to', 'body']
     },
-    handler: async ({ to, body, file }) => {
+    handler: withErrorHandler(async ({ to, body, file }) => {
       const modeError = requireLocalMode('send-message');
       if (modeError) return modeError;
       try {
         const result = await localClient.sendMessage({ to, body });
-        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+        return formatSuccess(JSON.stringify(result, null, 2));
       } catch (error) {
         // Fallback to imsg CLI
         try {
           const args = ['send', '--to', to, '--text', body];
           if (file) args.push('--file', file);
           const result = runImsg(args);
-          return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+          return formatSuccess(JSON.stringify(result, null, 2));
         } catch (e) {
-          return handleError(error, 'send-message');
+          throw new Error(`${error.message} (imsg fallback also failed: ${e.message})`);
         }
       }
-    }
+    }, 'send-message')
   },
   {
     name: 'react-message',
@@ -121,12 +146,12 @@ const messagesTools = [
       },
       required: ['chatId', 'type']
     },
-    handler: async ({ chatId, type }) => {
+    handler: withErrorHandler(async ({ chatId, type }) => {
       const modeError = requireLocalMode('react-message');
       if (modeError) return modeError;
       const result = runImsg(['react', '--chat-id', String(chatId), '--type', type]);
-      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
-    }
+      return formatSuccess(JSON.stringify(result, null, 2));
+    }, 'react-message')
   }
 ];
 

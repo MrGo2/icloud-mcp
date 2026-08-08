@@ -4,7 +4,7 @@
  */
 
 const localClient = require('./local-client');
-const { handleError, formatError } = require('../utils/error-handler');
+const { formatError } = require('../utils/error-handler');
 const { isLocalMode } = require('../mode');
 
 function requireLocalMode(toolName) {
@@ -36,7 +36,7 @@ const safariTools = [
           }]
         };
       } catch (error) {
-        return handleError(error, 'list-safari-tabs');
+        return formatError(error, 'list-safari-tabs');
       }
     }
   },
@@ -61,7 +61,7 @@ const safariTools = [
           }]
         };
       } catch (error) {
-        return handleError(error, 'get-current-safari-url');
+        return formatError(error, 'get-current-safari-url');
       }
     }
   },
@@ -95,7 +95,7 @@ const safariTools = [
           }]
         };
       } catch (error) {
-        return handleError(error, 'open-safari-url');
+        return formatError(error, 'open-safari-url');
       }
     }
   },
@@ -129,7 +129,7 @@ const safariTools = [
           }]
         };
       } catch (error) {
-        return handleError(error, 'close-safari-tab');
+        return formatError(error, 'close-safari-tab');
       }
     }
   }
