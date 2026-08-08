@@ -29,14 +29,25 @@ function formatError(error, context = '') {
 
 /**
  * Create success response
+ *
+ * @param {string} text - Human-readable result
+ * @param {Object} [structuredContent] - Machine-readable result. Only pass this
+ *   when the tool declares an outputSchema; the SDK validates one against the
+ *   other and fails the call if they disagree.
  */
-function formatSuccess(text) {
-  return {
+function formatSuccess(text, structuredContent) {
+  const response = {
     content: [{
       type: 'text',
       text: text
     }]
   };
+
+  if (structuredContent !== undefined) {
+    response.structuredContent = structuredContent;
+  }
+
+  return response;
 }
 
 /**
