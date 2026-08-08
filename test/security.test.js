@@ -83,6 +83,54 @@ check('newlines survive escaping as <br>', () => {
   assert(html === 'line one<br>line two', 'got: ' + html);
 });
 
+console.log('\nupdate-event preserves properties it does not touch');
+{
+  const { applyICalChanges } = require(path.join(ROOT, 'calendar/caldav-client'));
+  const ICAL = [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'BEGIN:VEVENT',
+    'UID:abc-123@icloud-mcp',
+    'DTSTAMP:20260101T090000Z',
+    'DTSTART:20260115T100000Z',
+    'DTEND:20260115T110000Z',
+    'SUMMARY:Old title',
+    'RRULE:FREQ=WEEKLY;COUNT=10',
+    'ATTENDEE;CN=Someone:mailto:someone@example.com',
+    'BEGIN:VALARM',
+    'ACTION:DISPLAY',
+    'END:VALARM',
+    'END:VEVENT',
+    'END:VCALENDAR'
+  ].join('\r\n');
+
+  check('replaces SUMMARY', () => {
+    const out = applyICalChanges(ICAL, { summary: 'New title' });
+    assert(out.includes('SUMMARY:New title'), 'summary not updated');
+    assert(!out.includes('SUMMARY:Old title'), 'old summary still present');
+  });
+  check('PRESERVES RRULE, ATTENDEE, VALARM and UID', () => {
+    const out = applyICalChanges(ICAL, { summary: 'New title' });
+    for (const keep of ['RRULE:FREQ=WEEKLY;COUNT=10', 'ATTENDEE;CN=Someone', 'BEGIN:VALARM', 'UID:abc-123@icloud-mcp']) {
+      assert(out.includes(keep), 'lost: ' + keep);
+    }
+  });
+  check('inserts a property that was absent', () => {
+    const out = applyICalChanges(ICAL, { location: 'Madrid' });
+    assert(out.includes('LOCATION:Madrid'), 'location not inserted');
+    assert(out.indexOf('LOCATION:Madrid') < out.indexOf('END:VEVENT'), 'inserted outside VEVENT');
+  });
+  check('leaves untouched fields alone', () => {
+    const out = applyICalChanges(ICAL, { summary: 'x' });
+    assert(out.includes('DTSTART:20260115T100000Z'), 'DTSTART changed unexpectedly');
+    assert(out.includes('DTEND:20260115T110000Z'), 'DTEND changed unexpectedly');
+  });
+  check('always refreshes DTSTAMP', () => {
+    const out = applyICalChanges(ICAL, { summary: 'x' });
+    assert(!out.includes('DTSTAMP:20260101T090000Z'), 'DTSTAMP not refreshed');
+  });
+}
+
 console.log('\nTool registry');
 const dirs = ['auth', 'email', 'calendar', 'contacts', 'reminders', 'notes', 'messages', 'safari'];
 let total = 0;

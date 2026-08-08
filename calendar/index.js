@@ -3,7 +3,7 @@
  * Provides calendar tools via CalDAV
  */
 
-const { listEvents, createEvent, deleteEvent, getCalendars } = require('./caldav-client');
+const { listEvents, createEvent, updateEvent, deleteEvent, getCalendars } = require('./caldav-client');
 const { formatSuccess, formatError, withErrorHandler } = require('../utils/error-handler');
 const { formatDate } = require('../utils/date-utils');
 const config = require('../config');
@@ -63,6 +63,38 @@ async function handleCreateEvent(args) {
   return formatSuccess(
     `Event created successfully!\n\nTitle: ${args.summary}\nStart: ${formatDate(new Date(args.start))}\nEnd: ${formatDate(new Date(args.end))}${args.location ? `\nLocation: ${args.location}` : ''}\nCalendar: ${result.calendar}\nUID: ${result.uid}`
   );
+}
+
+/**
+ * Handler: Update event
+ */
+async function handleUpdateEvent(args) {
+  if (!args.eventUrl) {
+    return formatError(new Error('Event URL is required (from list-events output)'));
+  }
+
+  const changes = {};
+  for (const field of ['summary', 'start', 'end', 'description', 'location']) {
+    if (args[field] !== undefined) changes[field] = args[field];
+  }
+
+  if (Object.keys(changes).length === 0) {
+    return formatError(new Error('Nothing to update. Provide at least one of: summary, start, end, description, location.'));
+  }
+
+  for (const field of ['start', 'end']) {
+    if (changes[field] !== undefined && Number.isNaN(new Date(changes[field]).getTime())) {
+      return formatError(new Error(`Invalid ${field} date. Use ISO 8601, e.g. 2026-01-15T10:00:00`));
+    }
+  }
+
+  await updateEvent(args.eventUrl, changes);
+
+  const summary = Object.entries(changes)
+    .map(([k, v]) => `${k}: ${v}`)
+    .join('\n');
+
+  return formatSuccess(`Event updated successfully.\n\n${summary}`);
 }
 
 /**
@@ -152,6 +184,41 @@ const calendarTools = [
     handler: withErrorHandler(handleCreateEvent, 'create-event')
   },
   {
+    name: 'update-event',
+    description: 'Updates an existing calendar event. Only the fields you pass are changed; recurrence, invitees and alarms are preserved.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        eventUrl: {
+          type: 'string',
+          description: 'URL of the event to update (from list-events output)'
+        },
+        summary: {
+          type: 'string',
+          description: 'New event title (optional)'
+        },
+        start: {
+          type: 'string',
+          description: 'New start date/time in ISO 8601 format (optional)'
+        },
+        end: {
+          type: 'string',
+          description: 'New end date/time in ISO 8601 format (optional)'
+        },
+        description: {
+          type: 'string',
+          description: 'New description (optional)'
+        },
+        location: {
+          type: 'string',
+          description: 'New location (optional)'
+        }
+      },
+      required: ['eventUrl']
+    },
+    handler: withErrorHandler(handleUpdateEvent, 'update-event')
+  },
+  {
     name: 'delete-event',
     description: 'Deletes a calendar event',
     inputSchema: {
@@ -182,6 +249,7 @@ module.exports = {
   calendarTools,
   handleListEvents,
   handleCreateEvent,
+  handleUpdateEvent,
   handleDeleteEvent,
   handleListCalendars
 };

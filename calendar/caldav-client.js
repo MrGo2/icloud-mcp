@@ -192,6 +192,87 @@ END:VCALENDAR`;
 }
 
 /**
+ * Rewrite individual properties of an existing VEVENT.
+ *
+ * Deliberately a line-level edit rather than rebuilding the iCalendar from
+ * scratch: a rebuild would silently drop RRULE, ATTENDEE, VALARM and any other
+ * property this server does not model, which on a real calendar means losing
+ * recurrence and invitees on every edit.
+ *
+ * @param {string} ical - Existing iCalendar text
+ * @param {Object} changes - Properties to set; undefined values are left alone
+ * @returns {string} - Updated iCalendar text
+ */
+function applyICalChanges(ical, { summary, start, end, description, location }) {
+  const updates = [];
+  if (summary !== undefined) updates.push(['SUMMARY', escapeICalText(summary)]);
+  if (start !== undefined) updates.push(['DTSTART', formatICalDate(new Date(start))]);
+  if (end !== undefined) updates.push(['DTEND', formatICalDate(new Date(end))]);
+  if (description !== undefined) updates.push(['DESCRIPTION', escapeICalText(description)]);
+  if (location !== undefined) updates.push(['LOCATION', escapeICalText(location)]);
+  updates.push(['DTSTAMP', formatICalDate(new Date())]);
+
+  const lines = ical.split(/\r?\n/);
+
+  for (const [key, value] of updates) {
+    // A property may carry parameters, e.g. DTSTART;TZID=Europe/Madrid:...
+    const idx = lines.findIndex(l => {
+      const upper = l.toUpperCase();
+      return upper.startsWith(key + ':') || upper.startsWith(key + ';');
+    });
+
+    if (idx !== -1) {
+      lines[idx] = `${key}:${value}`;
+    } else {
+      const endIdx = lines.findIndex(l => l.toUpperCase().startsWith('END:VEVENT'));
+      lines.splice(endIdx === -1 ? lines.length : endIdx, 0, `${key}:${value}`);
+    }
+  }
+
+  return lines.join('\r\n');
+}
+
+/**
+ * Update an existing event, preserving every property not being changed.
+ */
+async function updateEvent(eventUrl, changes) {
+  const client = await getClient();
+  const calendars = await client.fetchCalendars();
+
+  let existing = null;
+  for (const calendar of calendars) {
+    try {
+      const objects = await client.fetchCalendarObjects({
+        calendar,
+        objectUrls: [eventUrl]
+      });
+      if (objects && objects.length && objects[0].data) {
+        existing = objects[0];
+        break;
+      }
+    } catch (error) {
+      // Wrong calendar for this URL; keep looking.
+    }
+  }
+
+  if (!existing) {
+    throw new Error(`Event not found: ${eventUrl}`);
+  }
+
+  const updated = applyICalChanges(existing.data, changes);
+
+  await client.updateCalendarObject({
+    calendarObject: {
+      url: eventUrl,
+      data: updated,
+      etag: existing.etag || ''
+    }
+  });
+
+  return { success: true, url: eventUrl };
+}
+
+/**
  * Delete an event
  */
 async function deleteEvent(eventUrl) {
@@ -232,6 +313,8 @@ module.exports = {
   getCalendars,
   listEvents,
   createEvent,
+  updateEvent,
   deleteEvent,
-  parseEvent
+  parseEvent,
+  applyICalChanges
 };
