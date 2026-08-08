@@ -6,8 +6,16 @@ This MCP server provides Claude with access to Apple services via two modes:
 
 | Mode | Description | Services | Requirements |
 |------|-------------|----------|--------------|
-| **LOCAL** (default) | AppleScript access to macOS apps | 7 services, 31 tools | macOS |
-| **CLOUD** | iCloud protocols (IMAP, CalDAV, CardDAV) | 3 services, 17 tools | App-specific password |
+| **LOCAL** (default) | AppleScript access to macOS apps | 7 services, 35 tools | macOS |
+| **CLOUD** | iCloud protocols (IMAP, CalDAV, CardDAV) | 3 services, 35 tools* | App-specific password |
+
+\* In CLOUD mode, local-only tools (Reminders, Notes, Messages, Safari) return an error when called.
+
+### Runtime Mode Switching
+
+Use `set-mode` to switch between modes **without restarting**:
+- `set-mode local` → AppleScript access to all macOS apps
+- `set-mode cloud` → iCloud protocols (requires credentials)
 
 ## Services Available
 
@@ -57,9 +65,10 @@ ICLOUD_APP_PASSWORD=xxxx-xxxx-xxxx-xxxx
 
 ```
 icloud-mcp/
-├── index.js              # Main MCP server (mode switching)
+├── index.js              # Main MCP server
+├── mode.js               # Runtime mode state management
 ├── config.js             # Configuration
-├── auth/                 # Credential management
+├── auth/                 # Credential management + set-mode
 ├── email/                # Email module
 │   ├── imap-client.js    # Cloud: IMAP
 │   ├── smtp-client.js    # Cloud: SMTP
@@ -91,11 +100,12 @@ icloud-mcp/
     └── error-handler.js
 ```
 
-## Tools (31 total in local mode)
+## Tools (35 total)
 
-### Auth (2)
+### Auth (3)
 - `about` - Server information
 - `check-auth-status` - Verify credentials
+- `set-mode` - Switch between LOCAL and CLOUD modes at runtime
 
 ### Email (6)
 - `list-emails` - List emails from folder

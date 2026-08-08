@@ -4,7 +4,15 @@
  */
 
 const localClient = require('./local-client');
-const { handleError } = require('../utils/error-handler');
+const { handleError, formatError } = require('../utils/error-handler');
+const { isLocalMode } = require('../mode');
+
+function requireLocalMode(toolName) {
+  if (!isLocalMode()) {
+    return formatError(new Error(`${toolName} is only available in LOCAL mode. Use set-mode to switch.`));
+  }
+  return null;
+}
 
 const safariTools = [
   {
@@ -16,6 +24,9 @@ const safariTools = [
       required: []
     },
     handler: async () => {
+      const modeError = requireLocalMode('list-safari-tabs');
+      if (modeError) return modeError;
+
       try {
         const tabs = await localClient.listTabs();
         return {
@@ -38,6 +49,9 @@ const safariTools = [
       required: []
     },
     handler: async () => {
+      const modeError = requireLocalMode('get-current-safari-url');
+      if (modeError) return modeError;
+
       try {
         const result = await localClient.getCurrentUrl();
         return {
@@ -69,6 +83,9 @@ const safariTools = [
       required: ['url']
     },
     handler: async ({ url, inNewWindow = false }) => {
+      const modeError = requireLocalMode('open-safari-url');
+      if (modeError) return modeError;
+
       try {
         const result = await localClient.openUrl(url, inNewWindow);
         return {
@@ -100,6 +117,9 @@ const safariTools = [
       required: []
     },
     handler: async ({ windowIndex = 0, tabIndex }) => {
+      const modeError = requireLocalMode('close-safari-tab');
+      if (modeError) return modeError;
+
       try {
         const result = await localClient.closeTab(windowIndex, tabIndex);
         return {

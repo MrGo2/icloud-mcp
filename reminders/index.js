@@ -1,21 +1,36 @@
 /**
  * Reminders Module
  * MCP tool definitions for Reminders.app
+ * NOTE: Only available in LOCAL mode (AppleScript)
  */
 
 const localClient = require('./local-client');
-const { handleError } = require('../utils/error-handler');
+const { handleError, formatError } = require('../utils/error-handler');
+const { isLocalMode } = require('../mode');
+
+/**
+ * Check if we're in local mode, return error if not
+ */
+function requireLocalMode(toolName) {
+  if (!isLocalMode()) {
+    return formatError(new Error(`${toolName} is only available in LOCAL mode. Use set-mode to switch.`));
+  }
+  return null;
+}
 
 const remindersTools = [
   {
     name: 'list-reminder-lists',
-    description: 'Lists all reminder lists from Reminders.app',
+    description: 'Lists all reminder lists from Reminders.app (LOCAL mode only)',
     inputSchema: {
       type: 'object',
       properties: {},
       required: []
     },
     handler: async () => {
+      const modeError = requireLocalMode('list-reminder-lists');
+      if (modeError) return modeError;
+
       try {
         const lists = await localClient.listReminderLists();
         return {
@@ -31,7 +46,7 @@ const remindersTools = [
   },
   {
     name: 'list-reminders',
-    description: 'Lists reminders from a specific list or all lists',
+    description: 'Lists reminders from a specific list or all lists (LOCAL mode only)',
     inputSchema: {
       type: 'object',
       properties: {
@@ -51,6 +66,9 @@ const remindersTools = [
       required: []
     },
     handler: async ({ listName, includeCompleted = false, count = 50 }) => {
+      const modeError = requireLocalMode('list-reminders');
+      if (modeError) return modeError;
+
       try {
         const reminders = await localClient.listReminders(listName, includeCompleted, count);
         return {
@@ -66,7 +84,7 @@ const remindersTools = [
   },
   {
     name: 'create-reminder',
-    description: 'Creates a new reminder',
+    description: 'Creates a new reminder (LOCAL mode only)',
     inputSchema: {
       type: 'object',
       properties: {
@@ -94,6 +112,9 @@ const remindersTools = [
       required: ['name']
     },
     handler: async (args) => {
+      const modeError = requireLocalMode('create-reminder');
+      if (modeError) return modeError;
+
       try {
         const result = await localClient.createReminder(args);
         return {
@@ -109,7 +130,7 @@ const remindersTools = [
   },
   {
     name: 'update-reminder',
-    description: 'Updates an existing reminder',
+    description: 'Updates an existing reminder (LOCAL mode only)',
     inputSchema: {
       type: 'object',
       properties: {
@@ -137,6 +158,9 @@ const remindersTools = [
       required: ['reminderId']
     },
     handler: async ({ reminderId, ...updates }) => {
+      const modeError = requireLocalMode('update-reminder');
+      if (modeError) return modeError;
+
       try {
         const result = await localClient.updateReminder(reminderId, updates);
         return {
@@ -152,7 +176,7 @@ const remindersTools = [
   },
   {
     name: 'complete-reminder',
-    description: 'Marks a reminder as complete or incomplete',
+    description: 'Marks a reminder as complete or incomplete (LOCAL mode only)',
     inputSchema: {
       type: 'object',
       properties: {
@@ -168,6 +192,9 @@ const remindersTools = [
       required: ['reminderId']
     },
     handler: async ({ reminderId, completed = true }) => {
+      const modeError = requireLocalMode('complete-reminder');
+      if (modeError) return modeError;
+
       try {
         const result = await localClient.completeReminder(reminderId, completed);
         return {
@@ -183,7 +210,7 @@ const remindersTools = [
   },
   {
     name: 'delete-reminder',
-    description: 'Deletes a reminder',
+    description: 'Deletes a reminder (LOCAL mode only)',
     inputSchema: {
       type: 'object',
       properties: {
@@ -195,6 +222,9 @@ const remindersTools = [
       required: ['reminderId']
     },
     handler: async ({ reminderId }) => {
+      const modeError = requireLocalMode('delete-reminder');
+      if (modeError) return modeError;
+
       try {
         const result = await localClient.deleteReminder(reminderId);
         return {
@@ -210,7 +240,7 @@ const remindersTools = [
   },
   {
     name: 'search-reminders',
-    description: 'Search reminders by text in name or body',
+    description: 'Search reminders by text in name or body (LOCAL mode only)',
     inputSchema: {
       type: 'object',
       properties: {
@@ -226,6 +256,9 @@ const remindersTools = [
       required: ['query']
     },
     handler: async ({ query, count = 25 }) => {
+      const modeError = requireLocalMode('search-reminders');
+      if (modeError) return modeError;
+
       try {
         const results = await localClient.searchReminders(query, count);
         return {

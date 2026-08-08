@@ -1,19 +1,57 @@
 /**
  * Contacts module for iCloud MCP
- * Provides contacts tools via CardDAV
+ * Provides contacts tools via CardDAV (cloud) or AppleScript (local)
  */
 
-const { listContacts, searchContacts, getContact, createContact, deleteContact } = require('./carddav-client');
+const cloudClient = require('./carddav-client');
+const localClient = require('./local-client');
 const { formatSuccess, formatError, withErrorHandler } = require('../utils/error-handler');
+const { isLocalMode } = require('../mode');
 const config = require('../config');
+
+/**
+ * Get the appropriate client based on current mode
+ */
+function getClient() {
+  return isLocalMode() ? localClient : cloudClient;
+}
+
+/**
+ * Normalize contact from local format to common format
+ */
+function normalizeLocalContact(contact) {
+  return {
+    displayName: contact.name || `${contact.firstName || ''} ${contact.lastName || ''}`.trim(),
+    firstName: contact.firstName,
+    lastName: contact.lastName,
+    emails: contact.email ? [{ value: contact.email, type: 'work' }] : (contact.emails || []),
+    phones: contact.phone ? [{ value: contact.phone, type: 'mobile' }] : (contact.phones || []),
+    organization: contact.organization,
+    title: contact.jobTitle,
+    notes: contact.note,
+    url: contact.id, // Use ID as URL for local contacts
+    uid: contact.id
+  };
+}
+
+/**
+ * Normalize contact list based on mode
+ */
+function normalizeContacts(contacts, isLocal) {
+  if (!isLocal) return contacts;
+  return contacts.map(normalizeLocalContact);
+}
 
 /**
  * Handler: List contacts
  */
 async function handleListContacts(args) {
   const count = Math.min(args.count || 25, config.DEFAULTS.MAX_RESULTS);
+  const local = isLocalMode();
+  const client = getClient();
 
-  const contacts = await listContacts(count);
+  const rawContacts = await client.listContacts(count);
+  const contacts = normalizeContacts(rawContacts, local);
 
   if (contacts.length === 0) {
     return formatSuccess('No contacts found.');
@@ -22,16 +60,16 @@ async function handleListContacts(args) {
   const lines = contacts.map((contact, i) => {
     let line = `${i + 1}. ${contact.displayName}`;
 
-    if (contact.emails.length > 0) {
+    if (contact.emails && contact.emails.length > 0) {
       line += `\n   Email: ${contact.emails[0].value}`;
     }
-    if (contact.phones.length > 0) {
+    if (contact.phones && contact.phones.length > 0) {
       line += `\n   Phone: ${contact.phones[0].value}`;
     }
     if (contact.organization) {
       line += `\n   Company: ${contact.organization}`;
     }
-    line += `\n   URL: ${contact.url}`;
+    line += `\n   ${local ? 'ID' : 'URL'}: ${contact.url}`;
 
     return line;
   });
@@ -48,7 +86,11 @@ async function handleSearchContacts(args) {
   }
 
   const count = Math.min(args.count || 25, config.DEFAULTS.MAX_RESULTS);
-  const contacts = await searchContacts(args.query, count);
+  const local = isLocalMode();
+  const client = getClient();
+
+  const rawContacts = await client.searchContacts(args.query, count);
+  const contacts = normalizeContacts(rawContacts, local);
 
   if (contacts.length === 0) {
     return formatSuccess(`No contacts found matching "${args.query}".`);
@@ -57,16 +99,16 @@ async function handleSearchContacts(args) {
   const lines = contacts.map((contact, i) => {
     let line = `${i + 1}. ${contact.displayName}`;
 
-    if (contact.emails.length > 0) {
+    if (contact.emails && contact.emails.length > 0) {
       line += `\n   Email: ${contact.emails[0].value}`;
     }
-    if (contact.phones.length > 0) {
+    if (contact.phones && contact.phones.length > 0) {
       line += `\n   Phone: ${contact.phones[0].value}`;
     }
     if (contact.organization) {
       line += `\n   Company: ${contact.organization}`;
     }
-    line += `\n   URL: ${contact.url}`;
+    line += `\n   ${local ? 'ID' : 'URL'}: ${contact.url}`;
 
     return line;
   });
@@ -79,17 +121,25 @@ async function handleSearchContacts(args) {
  */
 async function handleReadContact(args) {
   if (!args.contactUrl) {
-    return formatError(new Error('Contact URL is required'));
+    return formatError(new Error('Contact URL/ID is required'));
   }
 
-  const contact = await getContact(args.contactUrl);
+  const local = isLocalMode();
+  const client = getClient();
 
-  const emailList = contact.emails.length > 0
-    ? contact.emails.map(e => `  - ${e.value} (${e.type})`).join('\n')
+  // Local uses readContact, cloud uses getContact
+  const rawContact = local
+    ? await client.readContact(args.contactUrl)
+    : await client.getContact(args.contactUrl);
+
+  const contact = local ? normalizeLocalContact(rawContact) : rawContact;
+
+  const emailList = contact.emails && contact.emails.length > 0
+    ? contact.emails.map(e => `  - ${e.value} (${e.type || e.label || 'other'})`).join('\n')
     : '  (none)';
 
-  const phoneList = contact.phones.length > 0
-    ? contact.phones.map(p => `  - ${p.value} (${p.type})`).join('\n')
+  const phoneList = contact.phones && contact.phones.length > 0
+    ? contact.phones.map(p => `  - ${p.value} (${p.type || p.label || 'other'})`).join('\n')
     : '  (none)';
 
   return formatSuccess(
@@ -110,7 +160,7 @@ Title: ${contact.title || '(not set)'}
 
 Notes: ${contact.notes || '(none)'}
 
-URL: ${contact.url}
+${local ? 'ID' : 'URL'}: ${contact.url}
 UID: ${contact.uid}`
   );
 }
@@ -123,21 +173,26 @@ async function handleCreateContact(args) {
     return formatError(new Error('At least displayName or firstName/lastName is required'));
   }
 
-  const result = await createContact({
+  const local = isLocalMode();
+  const client = getClient();
+
+  const result = await client.createContact({
     displayName: args.displayName,
     firstName: args.firstName,
     lastName: args.lastName,
     email: args.email,
     phone: args.phone,
     organization: args.organization,
-    title: args.title,
-    notes: args.notes
+    jobTitle: args.title, // Local uses jobTitle
+    title: args.title,    // Cloud uses title
+    note: args.notes,     // Local uses note
+    notes: args.notes     // Cloud uses notes
   });
 
   const name = args.displayName || `${args.firstName || ''} ${args.lastName || ''}`.trim();
 
   return formatSuccess(
-    `Contact created successfully!\n\nName: ${name}${args.email ? `\nEmail: ${args.email}` : ''}${args.phone ? `\nPhone: ${args.phone}` : ''}${args.organization ? `\nOrganization: ${args.organization}` : ''}\nUID: ${result.uid}`
+    `Contact created successfully!\n\nName: ${name}${args.email ? `\nEmail: ${args.email}` : ''}${args.phone ? `\nPhone: ${args.phone}` : ''}${args.organization ? `\nOrganization: ${args.organization}` : ''}\n${local ? 'ID' : 'UID'}: ${result.uid || result.id}`
   );
 }
 
@@ -146,12 +201,55 @@ async function handleCreateContact(args) {
  */
 async function handleDeleteContact(args) {
   if (!args.contactUrl) {
-    return formatError(new Error('Contact URL is required'));
+    return formatError(new Error('Contact URL/ID is required'));
   }
 
-  await deleteContact(args.contactUrl);
+  const client = getClient();
+  await client.deleteContact(args.contactUrl);
 
   return formatSuccess('Contact deleted successfully.');
+}
+
+/**
+ * Handler: List contact accounts (LOCAL mode only)
+ */
+async function handleListContactAccounts(args) {
+  if (!isLocalMode()) {
+    return formatError(new Error('list-contact-accounts is only available in LOCAL mode'));
+  }
+
+  const accounts = await localClient.listAccounts();
+
+  if (accounts.length === 0) {
+    return formatSuccess('No contact accounts found.');
+  }
+
+  const lines = accounts.map((account, i) => {
+    return `${i + 1}. ${account.name}\n   Groups: ${account.groupCount}\n   ID: ${account.id}`;
+  });
+
+  return formatSuccess(`Contact Accounts (${accounts.length}):\n\n${lines.join('\n\n')}`);
+}
+
+/**
+ * Handler: List contact groups (LOCAL mode only)
+ */
+async function handleListContactGroups(args) {
+  if (!isLocalMode()) {
+    return formatError(new Error('list-contact-groups is only available in LOCAL mode'));
+  }
+
+  const groups = await localClient.listGroups(args.accountId || null);
+
+  if (groups.length === 0) {
+    return formatSuccess('No contact groups found.');
+  }
+
+  const lines = groups.map((group, i) => {
+    return `${i + 1}. ${group.name}\n   Account: ${group.accountName}\n   Contacts: ${group.contactCount}\n   ID: ${group.id}`;
+  });
+
+  return formatSuccess(`Contact Groups (${groups.length}):\n\n${lines.join('\n\n')}`);
 }
 
 // Tool definitions
@@ -262,6 +360,31 @@ const contactsTools = [
       required: ['contactUrl']
     },
     handler: withErrorHandler(handleDeleteContact, 'delete-contact')
+  },
+  {
+    name: 'list-contact-accounts',
+    description: 'Lists all contact accounts (iCloud, Google, Exchange, etc.) - LOCAL mode only',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+      required: []
+    },
+    handler: withErrorHandler(handleListContactAccounts, 'list-contact-accounts')
+  },
+  {
+    name: 'list-contact-groups',
+    description: 'Lists contact groups from all accounts or a specific account - LOCAL mode only',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        accountId: {
+          type: 'string',
+          description: 'Optional account ID to filter groups by (from list-contact-accounts)'
+        }
+      },
+      required: []
+    },
+    handler: withErrorHandler(handleListContactGroups, 'list-contact-groups')
   }
 ];
 
@@ -271,5 +394,7 @@ module.exports = {
   handleSearchContacts,
   handleReadContact,
   handleCreateContact,
-  handleDeleteContact
+  handleDeleteContact,
+  handleListContactAccounts,
+  handleListContactGroups
 };

@@ -1,21 +1,33 @@
 /**
  * Notes Module
  * MCP tool definitions for Notes.app
+ * NOTE: Only available in LOCAL mode (AppleScript)
  */
 
 const localClient = require('./local-client');
-const { handleError } = require('../utils/error-handler');
+const { handleError, formatError } = require('../utils/error-handler');
+const { isLocalMode } = require('../mode');
+
+function requireLocalMode(toolName) {
+  if (!isLocalMode()) {
+    return formatError(new Error(`${toolName} is only available in LOCAL mode. Use set-mode to switch.`));
+  }
+  return null;
+}
 
 const notesTools = [
   {
     name: 'list-note-folders',
-    description: 'Lists all folders in Notes.app',
+    description: 'Lists all folders in Notes.app (LOCAL mode only)',
     inputSchema: {
       type: 'object',
       properties: {},
       required: []
     },
     handler: async () => {
+      const modeError = requireLocalMode('list-note-folders');
+      if (modeError) return modeError;
+
       try {
         const folders = await localClient.listNoteFolders();
         return {
@@ -47,6 +59,9 @@ const notesTools = [
       required: []
     },
     handler: async ({ folderName, count = 25 }) => {
+      const modeError = requireLocalMode('list-notes');
+      if (modeError) return modeError;
+
       try {
         const notes = await localClient.listNotes(folderName, count);
         return {
@@ -74,6 +89,9 @@ const notesTools = [
       required: ['noteId']
     },
     handler: async ({ noteId }) => {
+      const modeError = requireLocalMode('read-note');
+      if (modeError) return modeError;
+
       try {
         const note = await localClient.readNote(noteId);
         if (!note) {
@@ -117,6 +135,9 @@ const notesTools = [
       required: ['title']
     },
     handler: async (args) => {
+      const modeError = requireLocalMode('create-note');
+      if (modeError) return modeError;
+
       try {
         const result = await localClient.createNote(args);
         return {
@@ -148,6 +169,9 @@ const notesTools = [
       required: ['query']
     },
     handler: async ({ query, count = 25 }) => {
+      const modeError = requireLocalMode('search-notes');
+      if (modeError) return modeError;
+
       try {
         const results = await localClient.searchNotes(query, count);
         return {
