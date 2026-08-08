@@ -70,7 +70,7 @@ ICLOUD_APP_PASSWORD=xxxx-xxxx-xxxx-xxxx
 
 ```
 icloud-mcp/
-├── index.js              # Main MCP server
+├── index.js              # MCP server (@modelcontextprotocol/server v2)
 ├── mode.js               # Runtime mode state management
 ├── config.js             # Configuration
 ├── auth/                 # Credential management + set-mode
@@ -101,7 +101,7 @@ icloud-mcp/
 │   └── index.js
 └── utils/
     ├── applescript.js    # AppleScript executor + arg coercion
-    ├── validate.js       # Validates tool args against inputSchema
+    ├── schemas.js        # Shared outputSchema helpers for list-* tools
     ├── date-utils.js
     └── error-handler.js
 ```
@@ -189,3 +189,29 @@ Grant access in **System Settings > Privacy & Security > Automation**.
 | Find My | ❌ | Internal API only |
 | Read Messages | ✅ | Via `imsg` CLI (needs Full Disk Access) |
 | Edit Notes | ⚠️ Limited | AppleScript limitation |
+
+## MCP implementation
+
+Built on `@modelcontextprotocol/server` v2 (`serveStdio` + `McpServer.registerTool`).
+The hand-rolled JSON-RPC loop is gone, and with it the whole class of bugs it
+carried: framing, notification handling, and unvalidated arguments.
+
+- **Protocol**: negotiated by the SDK, currently up to `2025-11-25`. `serveStdio`
+  takes a *factory*, not an instance, because the opening exchange picks the
+  protocol era and pins one instance per connection.
+- **Validation**: every tool declares a zod v4 `inputSchema`. The SDK validates
+  before the handler runs, so a string in a numeric field is rejected at the
+  boundary — this is what closes the AppleScript injection class. The `asInt`
+  and `asBool` coercions in `utils/applescript.js` remain as defence in depth.
+- **Annotations**: every tool carries `title` plus `readOnlyHint`,
+  `destructiveHint`, `idempotentHint` and `openWorldHint`.
+- **Structured output**: all 15 `list-*` tools declare an `outputSchema` and
+  return `structuredContent`. Schemas are deliberately permissive
+  (`z.array(z.looseObject({}))`) because the underlying fields vary by macOS
+  version and account type, and the SDK *fails* a call whose structuredContent
+  does not match its schema. Note this makes `structuredContent` mandatory on
+  every success path; error results (`isError: true`) are exempt.
+- **Mode switching**: `set-mode` fires `notifications/tools/list_changed` via
+  the listener registered in `mode.js`.
+
+Requires **Node >= 20**. Dependencies are managed with **pnpm** (`pnpm-lock.yaml`).

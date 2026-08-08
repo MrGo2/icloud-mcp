@@ -217,7 +217,7 @@ Reading requires the [`imsg`](https://github.com/steipete/imsg) CLI and Full Dis
 
 ```
 icloud-mcp/
-├── index.js              # MCP server (JSON-RPC over stdio)
+├── index.js              # MCP server (@modelcontextprotocol/server v2)
 ├── mode.js               # Runtime mode state
 ├── config.js             # Configuration
 ├── auth/                 # Credential management + set-mode

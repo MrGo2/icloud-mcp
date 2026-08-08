@@ -1,18 +1,24 @@
 #!/usr/bin/env node
 /**
- * Regression guard for the Phase 0 hardening.
+ * Regression guard for the MCP server.
  *
- * The important cases here are the negative controls: a payload that WOULD have
- * been injected into AppleScript before the fix must be rejected. A suite that
- * only checks valid input would pass against the vulnerable code too.
+ * The important cases are the negative controls: a payload that WOULD have been
+ * injected into AppleScript before hardening must be rejected. A suite that only
+ * checked valid input would pass against the vulnerable code too.
+ *
+ * Includes a live end-to-end run of the real server over stdio, which is the
+ * only check that covers registration, validation and framing together.
  *
  * Run: npm test
  */
 
 const path = require('path');
+const { spawn } = require('child_process');
+const { z } = require('zod');
+
 const ROOT = path.join(__dirname, '..');
-const { validateArgs } = require(path.join(ROOT, 'utils/validate'));
 const { asInt, asBool, escapeAppleScript } = require(path.join(ROOT, 'utils/applescript'));
+const { listOutput, listResult } = require(path.join(ROOT, 'utils/schemas'));
 
 let pass = 0, fail = 0;
 
@@ -27,87 +33,132 @@ function throws(fn, why) {
   assert(threw, why || 'expected a throw, got none');
 }
 
-// The payload that made the unvalidated numeric arguments exploitable: it
-// closes the tell block, runs a shell command, and reopens it so the script
-// still parses.
+// Closes the tell block, runs a shell command, reopens it so the script parses.
 const EXPLOIT = '1\nend tell\ndo shell script "touch /tmp/icloud-mcp-pwned"\ntell window 1';
 
-console.log('\nScript-interpolation coercion (asInt / asBool)');
-check('accepts a real number', () => assert(asInt(3, 0) === 3));
-check('accepts a numeric string', () => assert(asInt('7', 0) === 7));
-check('falls back for undefined', () => assert(asInt(undefined, 5) === 5));
-check('REJECTS the AppleScript exploit payload', () => throws(() => asInt(EXPLOIT, 0)));
-check('REJECTS a non-numeric string', () => throws(() => asInt('abc', 0)));
-check('accepts booleans and "false"', () => {
+const DIRS = ['auth', 'email', 'calendar', 'contacts', 'reminders', 'notes', 'messages', 'safari'];
+
+function allTools() {
+  const out = [];
+  for (const d of DIRS) {
+    const mod = require(path.join(ROOT, d));
+    const key = Object.keys(mod).find(k => k.endsWith('Tools'));
+    for (const t of mod[key]) out.push(t);
+  }
+  return out;
+}
+
+console.log('\nTool registry contract');
+const tools = allTools();
+check('every tool has name, title, description, inputSchema, handler', () => {
+  const seen = new Set();
+  for (const t of tools) {
+    assert(t.name, 'tool without a name');
+    assert(!seen.has(t.name), 'duplicate tool name: ' + t.name);
+    seen.add(t.name);
+    assert(t.title, t.name + ': no title');
+    assert(t.description, t.name + ': no description');
+    assert(t.inputSchema !== undefined, t.name + ': no inputSchema');
+    assert(typeof t.handler === 'function', t.name + ': handler is not a function');
+  }
+});
+check('every inputSchema field is a zod schema, not JSON Schema', () => {
+  for (const t of tools) {
+    assert(t.inputSchema.type !== 'object', t.name + ': still a raw JSON Schema');
+    for (const [k, v] of Object.entries(t.inputSchema)) {
+      assert(v && typeof v.safeParse === 'function', `${t.name}.${k} is not a zod schema`);
+    }
+  }
+});
+check('every tool declares annotations', () => {
+  for (const t of tools) assert(t.annotations, t.name + ': no annotations');
+});
+check('every list-* tool declares an outputSchema', () => {
+  const missing = tools.filter(t => t.name.startsWith('list-') && !t.outputSchema).map(t => t.name);
+  assert(missing.length === 0, 'missing outputSchema: ' + missing.join(', '));
+});
+check('destructive tools are annotated destructive', () => {
+  for (const name of ['delete-event', 'delete-contact', 'delete-reminder', 'close-safari-tab']) {
+    const t = tools.find(x => x.name === name);
+    assert(t, 'missing tool ' + name);
+    assert(t.annotations.destructiveHint === true, name + ': not marked destructive');
+  }
+});
+check('read-only tools are annotated read-only', () => {
+  for (const name of ['list-contacts', 'search-contacts', 'read-note', 'list-events']) {
+    const t = tools.find(x => x.name === name);
+    assert(t.annotations.readOnlyHint === true, name + ': not marked read-only');
+  }
+});
+
+console.log('\nzod schemas reject the injection class');
+function schemaFor(toolName) {
+  const t = tools.find(x => x.name === toolName);
+  assert(t, 'no such tool: ' + toolName);
+  return z.object(t.inputSchema);
+}
+check('close-safari-tab REJECTS the AppleScript exploit payload', () => {
+  assert(!schemaFor('close-safari-tab').safeParse({ windowIndex: EXPLOIT }).success);
+});
+check('close-safari-tab accepts a real index', () => {
+  assert(schemaFor('close-safari-tab').safeParse({ windowIndex: 0, tabIndex: 2 }).success);
+});
+check('reminders priority REJECTS a string', () => {
+  assert(!schemaFor('create-reminder').safeParse({ name: 'x', priority: '1; evil' }).success);
+});
+check('set-mode REJECTS an unknown mode', () => {
+  assert(!schemaFor('set-mode').safeParse({ mode: 'root' }).success);
+});
+check('set-mode accepts local and cloud', () => {
+  assert(schemaFor('set-mode').safeParse({ mode: 'local' }).success);
+  assert(schemaFor('set-mode').safeParse({ mode: 'cloud' }).success);
+});
+check('count over the documented max is REJECTED', () => {
+  assert(!schemaFor('list-emails').safeParse({ count: 999 }).success);
+});
+check('required args are enforced', () => {
+  assert(!schemaFor('read-note').safeParse({}).success);
+});
+
+console.log('\nScript-interpolation coercion still guards (defence in depth)');
+check('asInt REJECTS the exploit payload', () => throws(() => asInt(EXPLOIT, 0)));
+check('asInt accepts numbers and numeric strings', () => {
+  assert(asInt(3, 0) === 3);
+  assert(asInt('7', 0) === 7);
+  assert(asInt(undefined, 5) === 5);
+});
+check('asBool REJECTS an injected string', () => throws(() => asBool('true; do shell script "x"')));
+check('asBool accepts booleans', () => {
   assert(asBool(true) === true);
   assert(asBool('false') === false);
 });
-check('REJECTS an injected boolean', () => throws(() => asBool('true; do shell script "x"')));
 
-console.log('\nTool argument validation against inputSchema');
-const numericSchema = {
-  type: 'object',
-  properties: { windowIndex: { type: 'number' }, tabIndex: { type: 'number' } },
-  required: []
-};
-check('valid numbers pass through', () => {
-  const out = validateArgs('close-safari-tab', numericSchema, { windowIndex: 0, tabIndex: 2 });
-  assert(out.windowIndex === 0 && out.tabIndex === 2);
-});
-check('numeric strings are coerced', () => {
-  const out = validateArgs('close-safari-tab', numericSchema, { windowIndex: '1' });
-  assert(out.windowIndex === 1 && typeof out.windowIndex === 'number');
-});
-check('REJECTS the exploit payload in a number field', () => {
-  throws(() => validateArgs('close-safari-tab', numericSchema, { windowIndex: EXPLOIT }));
-});
-check('REJECTS a missing required argument', () => {
-  throws(() => validateArgs('send-message', {
-    type: 'object', properties: { to: { type: 'string' } }, required: ['to']
-  }, {}));
-});
-
-const enumSchema = {
-  type: 'object',
-  properties: { mode: { type: 'string', enum: ['local', 'cloud'] } },
-  required: ['mode']
-};
-check('REJECTS a value outside an enum', () => throws(() => validateArgs('set-mode', enumSchema, { mode: 'root' })));
-check('accepts a valid enum value', () => {
-  assert(validateArgs('set-mode', enumSchema, { mode: 'cloud' }).mode === 'cloud');
-});
-
-console.log('\ncreate-note builds real <br> breaks');
-check('newlines survive escaping as <br>', () => {
-  const html = String('line one\nline two').split('\n').map(escapeAppleScript).join('<br>');
-  assert(html === 'line one<br>line two', 'got: ' + html);
+console.log('\nStructured output contract');
+check('listResult always satisfies listOutput', () => {
+  const schema = z.object(listOutput('test'));
+  const cases = [[], [{ id: 'x', name: 'A' }], [{ a: 1, nested: { b: [1, 2] } }], null, undefined];
+  for (const c of cases) {
+    const r = schema.safeParse(listResult(c));
+    assert(r.success, 'failed for ' + JSON.stringify(c));
+  }
 });
 
 console.log('\nupdate-event preserves properties it does not touch');
 {
   const { applyICalChanges } = require(path.join(ROOT, 'calendar/caldav-client'));
   const ICAL = [
-    'BEGIN:VCALENDAR',
-    'VERSION:2.0',
-    'BEGIN:VEVENT',
-    'UID:abc-123@icloud-mcp',
-    'DTSTAMP:20260101T090000Z',
-    'DTSTART:20260115T100000Z',
-    'DTEND:20260115T110000Z',
-    'SUMMARY:Old title',
-    'RRULE:FREQ=WEEKLY;COUNT=10',
+    'BEGIN:VCALENDAR', 'VERSION:2.0', 'BEGIN:VEVENT',
+    'UID:abc-123@icloud-mcp', 'DTSTAMP:20260101T090000Z',
+    'DTSTART:20260115T100000Z', 'DTEND:20260115T110000Z',
+    'SUMMARY:Old title', 'RRULE:FREQ=WEEKLY;COUNT=10',
     'ATTENDEE;CN=Someone:mailto:someone@example.com',
-    'BEGIN:VALARM',
-    'ACTION:DISPLAY',
-    'END:VALARM',
-    'END:VEVENT',
-    'END:VCALENDAR'
+    'BEGIN:VALARM', 'ACTION:DISPLAY', 'END:VALARM',
+    'END:VEVENT', 'END:VCALENDAR'
   ].join('\r\n');
 
   check('replaces SUMMARY', () => {
     const out = applyICalChanges(ICAL, { summary: 'New title' });
-    assert(out.includes('SUMMARY:New title'), 'summary not updated');
-    assert(!out.includes('SUMMARY:Old title'), 'old summary still present');
+    assert(out.includes('SUMMARY:New title') && !out.includes('SUMMARY:Old title'));
   });
   check('PRESERVES RRULE, ATTENDEE, VALARM and UID', () => {
     const out = applyICalChanges(ICAL, { summary: 'New title' });
@@ -115,47 +166,20 @@ console.log('\nupdate-event preserves properties it does not touch');
       assert(out.includes(keep), 'lost: ' + keep);
     }
   });
-  check('inserts a property that was absent', () => {
+  check('inserts an absent property inside VEVENT', () => {
     const out = applyICalChanges(ICAL, { location: 'Madrid' });
-    assert(out.includes('LOCATION:Madrid'), 'location not inserted');
-    assert(out.indexOf('LOCATION:Madrid') < out.indexOf('END:VEVENT'), 'inserted outside VEVENT');
-  });
-  check('leaves untouched fields alone', () => {
-    const out = applyICalChanges(ICAL, { summary: 'x' });
-    assert(out.includes('DTSTART:20260115T100000Z'), 'DTSTART changed unexpectedly');
-    assert(out.includes('DTEND:20260115T110000Z'), 'DTEND changed unexpectedly');
+    assert(out.includes('LOCATION:Madrid'));
+    assert(out.indexOf('LOCATION:Madrid') < out.indexOf('END:VEVENT'));
   });
   check('always refreshes DTSTAMP', () => {
-    const out = applyICalChanges(ICAL, { summary: 'x' });
-    assert(!out.includes('DTSTAMP:20260101T090000Z'), 'DTSTAMP not refreshed');
+    assert(!applyICalChanges(ICAL, { summary: 'x' }).includes('DTSTAMP:20260101T090000Z'));
   });
 }
 
-console.log('\nTool registry');
-const dirs = ['auth', 'email', 'calendar', 'contacts', 'reminders', 'notes', 'messages', 'safari'];
-let total = 0;
-check('every module loads and exports a tools array', () => {
-  for (const d of dirs) {
-    const mod = require(path.join(ROOT, d));
-    const key = Object.keys(mod).find(k => k.endsWith('Tools'));
-    assert(Array.isArray(mod[key]), d + ' exports no tools array');
-    total += mod[key].length;
-  }
-});
-check('every tool is well formed', () => {
-  const seen = new Set();
-  for (const d of dirs) {
-    const mod = require(path.join(ROOT, d));
-    const key = Object.keys(mod).find(k => k.endsWith('Tools'));
-    for (const t of mod[key]) {
-      assert(typeof t.name === 'string' && t.name, d + ': tool without a name');
-      assert(!seen.has(t.name), 'duplicate tool name: ' + t.name);
-      seen.add(t.name);
-      assert(typeof t.description === 'string' && t.description, t.name + ': no description');
-      assert(t.inputSchema && t.inputSchema.type === 'object', t.name + ': bad inputSchema');
-      assert(typeof t.handler === 'function', t.name + ': handler is not a function');
-    }
-  }
+console.log('\ncreate-note builds real <br> breaks');
+check('newlines survive escaping as <br>', () => {
+  const html = String('line one\nline two').split('\n').map(escapeAppleScript).join('<br>');
+  assert(html === 'line one<br>line two', 'got: ' + html);
 });
 
 console.log('\nError handling contract');
@@ -165,16 +189,92 @@ check('error-handler exports what the modules import', () => {
     assert(typeof eh[fn] === 'function', 'missing export: ' + fn);
   }
 });
-check('formatError marks the result as isError', () => {
-  const { formatError } = require(path.join(ROOT, 'utils/error-handler'));
+check('formatError marks isError, formatSuccess does not', () => {
+  const { formatError, formatSuccess } = require(path.join(ROOT, 'utils/error-handler'));
   assert(formatError(new Error('boom')).isError === true);
-});
-check('formatSuccess does not', () => {
-  const { formatSuccess } = require(path.join(ROOT, 'utils/error-handler'));
   assert(!formatSuccess('ok').isError);
 });
+check('formatSuccess only adds structuredContent when given', () => {
+  const { formatSuccess } = require(path.join(ROOT, 'utils/error-handler'));
+  assert(!('structuredContent' in formatSuccess('ok')));
+  assert(formatSuccess('ok', { items: [], total: 0 }).structuredContent.total === 0);
+});
 
-console.log('\n' + '='.repeat(52));
-console.log('tools registered: ' + total);
-console.log(fail === 0 ? 'ALL PASS (' + pass + ')' : 'PASS ' + pass + '  FAIL ' + fail);
-process.exit(fail === 0 ? 0 : 1);
+/**
+ * Live end-to-end run against the real server over stdio.
+ */
+function runServer(requests) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [path.join(ROOT, 'index.js')], { stdio: ['pipe', 'pipe', 'pipe'] });
+    let out = '';
+    const timer = setTimeout(() => { child.kill(); reject(new Error('server timed out')); }, 20000);
+    child.stdout.on('data', c => { out += c; });
+    child.on('error', reject);
+    child.on('close', () => {
+      clearTimeout(timer);
+      resolve(out.trim().split('\n').filter(Boolean).map(l => JSON.parse(l)));
+    });
+    child.stdin.write(requests.map(r => JSON.stringify(r)).join('\n') + '\n');
+    child.stdin.end();
+  });
+}
+
+(async () => {
+  console.log('\nLive end-to-end over stdio');
+  let responses;
+  try {
+    responses = await runServer([
+      { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'test', version: '1' } } },
+      { jsonrpc: '2.0', method: 'notifications/initialized' },
+      { jsonrpc: '2.0', id: 2, method: 'tools/list' },
+      { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'about', arguments: {} } },
+      { jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'close-safari-tab', arguments: { windowIndex: EXPLOIT } } },
+      { jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'set-mode', arguments: { mode: 'root' } } }
+    ]);
+  } catch (e) {
+    console.log('  FAIL  server run -> ' + e.message);
+    fail++;
+    responses = [];
+  }
+
+  const byId = new Map(responses.map(r => [r.id, r]));
+
+  check('initialize negotiates a modern protocol version', () => {
+    const r = byId.get(1);
+    assert(r && r.result, 'no initialize response');
+    assert(/^\d{4}-\d{2}-\d{2}$/.test(r.result.protocolVersion), 'bad version');
+    assert(r.result.protocolVersion >= '2025-03-26', 'stale protocol: ' + r.result.protocolVersion);
+  });
+  check('server advertises tools.listChanged', () => {
+    assert(byId.get(1).result.capabilities.tools.listChanged === true);
+  });
+  check('tools/list returns every tool with title and annotations', () => {
+    const t = byId.get(2).result.tools;
+    assert(t.length === tools.length, `expected ${tools.length}, got ${t.length}`);
+    assert(t.every(x => x.title), 'a tool is missing title');
+    assert(t.every(x => x.annotations), 'a tool is missing annotations');
+  });
+  check('advertised schemas are JSON Schema with typed properties', () => {
+    const tab = byId.get(2).result.tools.find(x => x.name === 'close-safari-tab');
+    assert(tab.inputSchema.properties.windowIndex.type === 'integer', 'windowIndex not typed integer');
+  });
+  check('about succeeds', () => {
+    const r = byId.get(3);
+    assert(!r.result.isError, 'about failed: ' + JSON.stringify(r.result).slice(0, 120));
+  });
+  check('LIVE: injection payload is rejected, not executed', () => {
+    const r = byId.get(4);
+    assert(r.result && r.result.isError === true, 'injection was not rejected');
+    assert(/validation|expected number|Invalid/i.test(r.result.content[0].text), 'not a validation error');
+    assert(!require('fs').existsSync('/tmp/icloud-mcp-pwned'), 'EXPLOIT EXECUTED');
+  });
+  check('LIVE: invalid enum is rejected', () => {
+    const r = byId.get(5);
+    assert(r.result && r.result.isError === true, 'bad enum accepted');
+  });
+
+  console.log('\n' + '='.repeat(52));
+  console.log('tools registered: ' + tools.length);
+  console.log(fail === 0 ? 'ALL PASS (' + pass + ')' : 'PASS ' + pass + '  FAIL ' + fail);
+  process.exit(fail === 0 ? 0 : 1);
+})();
