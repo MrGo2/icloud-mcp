@@ -1,6 +1,6 @@
 {
   "name": "icloud-mcp",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "MCP server for Apple services: Email, Calendar, Contacts, Reminders, Notes, Messages and Safari, via macOS apps (local) or iCloud protocols (cloud)",
   "main": "index.js",
   "bin": {

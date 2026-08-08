@@ -35,16 +35,17 @@ Uses AppleScript to access native macOS apps. **Faster, works offline, more serv
 
 | Service | Backend | Tools |
 |---------|---------|-------|
-| **Email** | IMAP / SMTP \* | 6 |
-| **Calendar** | CalDAV \* | 5 |
+| **Email** | Mail.app | 6 |
+| **Calendar** | Calendar.app | 5 |
 | **Contacts** | Contacts.app | 7 |
 | **Reminders** | Reminders.app | 7 |
 | **Notes** | Notes.app | 5 |
 | **Messages** | Messages.app + `imsg` | 4 |
 | **Safari** | Safari.app | 4 |
 
-\* Email and Calendar still use the iCloud protocols in both modes and need
-credentials. Their AppleScript clients exist but are not wired up yet.
+All seven services honour the mode: LOCAL drives the macOS apps, CLOUD uses
+the iCloud protocols. `update-event` in CLOUD mode is experimental — the
+CalDAV update path is new and its live round-trip is not yet verified.
 
 ### Cloud Mode - Works Anywhere
 Uses iCloud protocols (IMAP, CalDAV, CardDAV). Requires app-specific password.
@@ -154,7 +155,7 @@ Add to your Claude Desktop MCP settings (`~/Library/Application Support/Claude/c
 | `list-events` | List upcoming events |
 | `list-calendars` | List all calendars |
 | `create-event` | Create new event |
-| `update-event` | Update an event, preserving recurrence and invitees |
+| `update-event` | Update an event, preserving recurrence and invitees (cloud: experimental) |
 | `delete-event` | Delete an event |
 
 ### Contacts (7)

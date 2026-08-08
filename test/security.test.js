@@ -133,6 +133,77 @@ check('asBool accepts booleans', () => {
   assert(asBool('false') === false);
 });
 
+console.log('\nDual-mode routing (email + calendar)');
+{
+  // Stub both clients so we can see which one a handler reaches, without
+  // touching Mail.app, Calendar.app or the network.
+  const Module = require('module');
+  const calls = [];
+  const realRequire = Module.prototype.require;
+  const stub = (label, fns) => {
+    const out = {};
+    for (const f of fns) out[f] = async () => { calls.push(label + '.' + f); return []; };
+    return out;
+  };
+  Module.prototype.require = function (id) {
+    if (id === './local-client' && this.filename.includes('/email/')) {
+      return stub('email-LOCAL', ['listEmails', 'listFolders']);
+    }
+    if (id === './imap-client') return stub('email-CLOUD', ['listEmails', 'listFolders']);
+    if (id === './local-client' && this.filename.includes('/calendar/')) {
+      return stub('cal-LOCAL', ['listEvents', 'listCalendars']);
+    }
+    if (id === './caldav-client') return stub('cal-CLOUD', ['listEvents', 'getCalendars']);
+    return realRequire.apply(this, arguments);
+  };
+
+  for (const k of Object.keys(require.cache)) {
+    if (/\/(email|calendar)\/index\.js$/.test(k)) delete require.cache[k];
+  }
+
+  const mode = require(path.join(ROOT, 'mode'));
+  const originalMode = mode.getMode();
+  const { emailTools } = require(path.join(ROOT, 'email'));
+  const { calendarTools } = require(path.join(ROOT, 'calendar'));
+  const byName = n => [...emailTools, ...calendarTools].find(t => t.name === n);
+
+  const exercise = async () => {
+    calls.length = 0;
+    await byName('list-emails').handler({ folder: 'inbox', count: 5 });
+    await byName('list-folders').handler({});
+    await byName('list-events').handler({ count: 5, daysAhead: 7 });
+    await byName('list-calendars').handler({});
+    return calls.join(',');
+  };
+
+  let localCalls, cloudCalls;
+  const done = (async () => {
+    mode.setMode('local');
+    localCalls = await exercise();
+    mode.setMode('cloud');
+    cloudCalls = await exercise();
+    mode.setMode(originalMode);
+  })();
+
+  done.then(() => {
+    check('LOCAL mode reaches the AppleScript clients', () => {
+      assert(/email-LOCAL\.listEmails/.test(localCalls), 'email not routed local: ' + localCalls);
+      assert(/cal-LOCAL\.listEvents/.test(localCalls), 'calendar not routed local: ' + localCalls);
+    });
+    check('CLOUD mode reaches the IMAP/CalDAV clients', () => {
+      assert(/email-CLOUD\.listEmails/.test(cloudCalls), 'email not routed cloud: ' + cloudCalls);
+      assert(/cal-CLOUD\.getCalendars/.test(cloudCalls), 'calendar not routed cloud: ' + cloudCalls);
+    });
+    check('no local client is reached in cloud mode', () => {
+      assert(!/-LOCAL\./.test(cloudCalls), 'local client leaked into cloud mode: ' + cloudCalls);
+    });
+    Module.prototype.require = realRequire;
+    for (const k of Object.keys(require.cache)) {
+      if (/\/(email|calendar)\/index\.js$/.test(k)) delete require.cache[k];
+    }
+  });
+}
+
 console.log('\nStructured output contract');
 check('listResult always satisfies listOutput', () => {
   const schema = z.object(listOutput('test'));

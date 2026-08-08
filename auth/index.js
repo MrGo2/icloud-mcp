@@ -38,7 +38,7 @@ async function handleAbout() {
   const cloudServices = 'Email, Calendar, Contacts';
 
   return formatSuccess(
-    `iCloud MCP Server v2.0.0
+    `iCloud MCP Server v2.1.0
 
 Mode: ${mode.toUpperCase()}
 Services: ${mode === 'local' ? localServices : cloudServices}

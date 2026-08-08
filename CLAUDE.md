@@ -23,18 +23,37 @@ Use `set-mode` to switch between modes **without restarting**:
 
 | Service | Protocol | Tools |
 |---------|----------|-------|
-| **Email** | IMAP/SMTP (not yet local) | 6 |
-| **Calendar** | CalDAV (not yet local) | 5 |
+| **Email** | Mail.app (AppleScript) | 6 |
+| **Calendar** | Calendar.app (AppleScript) | 5 |
 | **Contacts** | Contacts.app (AppleScript) | 7 |
 | **Reminders** | Reminders.app (AppleScript) | 7 |
 | **Notes** | Notes.app (AppleScript) | 5 |
 | **Messages** | Messages.app + `imsg` CLI | 4 |
 | **Safari** | Safari.app (AppleScript) | 4 |
 
-> **Known gap:** `email/index.js` and `calendar/index.js` import their cloud
-> clients directly and do no mode routing, so `email/local-client.js` and
-> `calendar/local-client.js` are currently unreachable. Both services need
-> credentials even in LOCAL mode.
+All seven services now honour the mode. Email and Calendar route through
+`local-client.js` in LOCAL mode and IMAP/SMTP/CalDAV in CLOUD mode.
+
+**Field differences between modes** (normalized where possible):
+
+| Field | LOCAL | CLOUD |
+|---|---|---|
+| Email handle (`uid` arg) | Mail.app message ID | IMAP UID |
+| Event/calendar handle | Calendar.app UID / calendar name | CalDAV URL |
+| Email unread flag | `read` boolean | `\Seen` in `flags` |
+| Event end time | available | available |
+| `send-email` message ID | not returned by Mail.app | returned by SMTP |
+| `create-event` target | `calendarName` | `calendarUrl` |
+
+Handlers normalize these to a common shape (`ref`, `unread`, `start`/`end`),
+so a tool returns the same field names in both modes. The two genuinely
+unavailable values are the SMTP message ID and `isHtml` (Mail.app sends plain
+text), which are simply omitted in LOCAL mode.
+
+> **`update-event` in CLOUD mode is experimental.** The CalDAV update path is
+> new. Its property-merge preserves RRULE, ATTENDEE and VALARM (unit-tested),
+> but the live round-trip against iCloud has not been verified — test on a
+> disposable calendar first. LOCAL mode uses Calendar.app and is unaffected.
 
 ### Cloud Mode
 
