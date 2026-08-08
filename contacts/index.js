@@ -3,9 +3,11 @@
  * Provides contacts tools via CardDAV (cloud) or AppleScript (local)
  */
 
+const { z } = require('zod');
 const cloudClient = require('./carddav-client');
 const localClient = require('./local-client');
 const { formatSuccess, formatError, withErrorHandler } = require('../utils/error-handler');
+const { listOutput, listResult } = require('../utils/schemas');
 const { isLocalMode } = require('../mode');
 const config = require('../config');
 
@@ -54,7 +56,7 @@ async function handleListContacts(args) {
   const contacts = normalizeContacts(rawContacts, local);
 
   if (contacts.length === 0) {
-    return formatSuccess('No contacts found.');
+    return formatSuccess('No contacts found.', listResult([]));
   }
 
   const lines = contacts.map((contact, i) => {
@@ -74,7 +76,7 @@ async function handleListContacts(args) {
     return line;
   });
 
-  return formatSuccess(`Contacts (${contacts.length}):\n\n${lines.join('\n\n')}`);
+  return formatSuccess(`Contacts (${contacts.length}):\n\n${lines.join('\n\n')}`, listResult(contacts));
 }
 
 /**
@@ -93,7 +95,7 @@ async function handleSearchContacts(args) {
   const contacts = normalizeContacts(rawContacts, local);
 
   if (contacts.length === 0) {
-    return formatSuccess(`No contacts found matching "${args.query}".`);
+    return formatSuccess(`No contacts found matching "${args.query}".`, listResult([]));
   }
 
   const lines = contacts.map((contact, i) => {
@@ -113,7 +115,7 @@ async function handleSearchContacts(args) {
     return line;
   });
 
-  return formatSuccess(`Search results for "${args.query}" (${contacts.length}):\n\n${lines.join('\n\n')}`);
+  return formatSuccess(`Search results for "${args.query}" (${contacts.length}):\n\n${lines.join('\n\n')}`, listResult(contacts));
 }
 
 /**
@@ -221,14 +223,14 @@ async function handleListContactAccounts(args) {
   const accounts = await localClient.listAccounts();
 
   if (accounts.length === 0) {
-    return formatSuccess('No contact accounts found.');
+    return formatSuccess('No contact accounts found.', listResult([]));
   }
 
   const lines = accounts.map((account, i) => {
     return `${i + 1}. ${account.name}\n   Groups: ${account.groupCount}\n   ID: ${account.id}`;
   });
 
-  return formatSuccess(`Contact Accounts (${accounts.length}):\n\n${lines.join('\n\n')}`);
+  return formatSuccess(`Contact Accounts (${accounts.length}):\n\n${lines.join('\n\n')}`, listResult(accounts));
 }
 
 /**
@@ -242,148 +244,96 @@ async function handleListContactGroups(args) {
   const groups = await localClient.listGroups(args.accountId || null);
 
   if (groups.length === 0) {
-    return formatSuccess('No contact groups found.');
+    return formatSuccess('No contact groups found.', listResult([]));
   }
 
   const lines = groups.map((group, i) => {
     return `${i + 1}. ${group.name}\n   Account: ${group.accountName}\n   Contacts: ${group.contactCount}\n   ID: ${group.id}`;
   });
 
-  return formatSuccess(`Contact Groups (${groups.length}):\n\n${lines.join('\n\n')}`);
+  return formatSuccess(`Contact Groups (${groups.length}):\n\n${lines.join('\n\n')}`, listResult(groups));
 }
 
 // Tool definitions
 const contactsTools = [
   {
     name: 'list-contacts',
+    outputSchema: listOutput('Contacts'),
+    title: 'List Contacts',
     description: 'Lists contacts from your iCloud address book',
     inputSchema: {
-      type: 'object',
-      properties: {
-        count: {
-          type: 'number',
-          description: 'Number of contacts to retrieve (default: 25, max: 50)'
-        }
-      },
-      required: []
+      count: z.number().int().min(1).max(50).optional().describe('Number of contacts to retrieve (default: 25, max: 50)')
     },
+    annotations: {"readOnlyHint":true,"idempotentHint":true,"openWorldHint":false},
     handler: withErrorHandler(handleListContacts, 'list-contacts')
   },
   {
     name: 'search-contacts',
+    outputSchema: listOutput('Matching contacts'),
+    title: 'Search Contacts',
     description: 'Search contacts by name, email, or phone',
     inputSchema: {
-      type: 'object',
-      properties: {
-        query: {
-          type: 'string',
-          description: 'Search query (name, email, or phone)'
-        },
-        count: {
-          type: 'number',
-          description: 'Max results (default: 25, max: 50)'
-        }
-      },
-      required: ['query']
+      query: z.string().describe('Search query (name, email, or phone)'),
+      count: z.number().int().min(1).max(50).optional().describe('Max results (default: 25, max: 50)')
     },
+    annotations: {"readOnlyHint":true,"idempotentHint":true,"openWorldHint":false},
     handler: withErrorHandler(handleSearchContacts, 'search-contacts')
   },
   {
     name: 'read-contact',
+    title: 'Read Contact',
     description: 'Get detailed information about a specific contact',
     inputSchema: {
-      type: 'object',
-      properties: {
-        contactUrl: {
-          type: 'string',
-          description: 'URL of the contact (from list-contacts output)'
-        }
-      },
-      required: ['contactUrl']
+      contactUrl: z.string().describe('URL or ID of the contact (from list-contacts output)')
     },
+    annotations: {"readOnlyHint":true,"idempotentHint":true,"openWorldHint":false},
     handler: withErrorHandler(handleReadContact, 'read-contact')
   },
   {
     name: 'create-contact',
+    title: 'Create Contact',
     description: 'Creates a new contact',
     inputSchema: {
-      type: 'object',
-      properties: {
-        displayName: {
-          type: 'string',
-          description: 'Full display name'
-        },
-        firstName: {
-          type: 'string',
-          description: 'First name'
-        },
-        lastName: {
-          type: 'string',
-          description: 'Last name'
-        },
-        email: {
-          type: 'string',
-          description: 'Email address'
-        },
-        phone: {
-          type: 'string',
-          description: 'Phone number'
-        },
-        organization: {
-          type: 'string',
-          description: 'Company/Organization'
-        },
-        title: {
-          type: 'string',
-          description: 'Job title'
-        },
-        notes: {
-          type: 'string',
-          description: 'Notes about the contact'
-        }
-      },
-      required: []
+      displayName: z.string().optional().describe('Full display name'),
+      firstName: z.string().optional().describe('First name'),
+      lastName: z.string().optional().describe('Last name'),
+      email: z.string().optional().describe('Email address'),
+      phone: z.string().optional().describe('Phone number'),
+      organization: z.string().optional().describe('Company/Organization'),
+      title: z.string().optional().describe('Job title'),
+      notes: z.string().optional().describe('Notes about the contact')
     },
+    annotations: {"readOnlyHint":false,"destructiveHint":false,"idempotentHint":false,"openWorldHint":false},
     handler: withErrorHandler(handleCreateContact, 'create-contact')
   },
   {
     name: 'delete-contact',
+    title: 'Delete Contact',
     description: 'Deletes a contact',
     inputSchema: {
-      type: 'object',
-      properties: {
-        contactUrl: {
-          type: 'string',
-          description: 'URL of the contact to delete (from list-contacts output)'
-        }
-      },
-      required: ['contactUrl']
+      contactUrl: z.string().describe('URL or ID of the contact to delete (from list-contacts output)')
     },
+    annotations: {"readOnlyHint":false,"destructiveHint":true,"idempotentHint":true,"openWorldHint":false},
     handler: withErrorHandler(handleDeleteContact, 'delete-contact')
   },
   {
     name: 'list-contact-accounts',
+    outputSchema: listOutput('Contact accounts'),
+    title: 'List Contact Accounts',
     description: 'Lists all contact accounts (iCloud, Google, Exchange, etc.) - LOCAL mode only',
-    inputSchema: {
-      type: 'object',
-      properties: {},
-      required: []
-    },
+    inputSchema: {},
+    annotations: {"readOnlyHint":true,"idempotentHint":true,"openWorldHint":false},
     handler: withErrorHandler(handleListContactAccounts, 'list-contact-accounts')
   },
   {
     name: 'list-contact-groups',
+    outputSchema: listOutput('Contact groups'),
+    title: 'List Contact Groups',
     description: 'Lists contact groups from all accounts or a specific account - LOCAL mode only',
     inputSchema: {
-      type: 'object',
-      properties: {
-        accountId: {
-          type: 'string',
-          description: 'Optional account ID to filter groups by (from list-contact-accounts)'
-        }
-      },
-      required: []
+      accountId: z.string().optional().describe('Optional account ID to filter groups by (from list-contact-accounts)')
     },
+    annotations: {"readOnlyHint":true,"idempotentHint":true,"openWorldHint":false},
     handler: withErrorHandler(handleListContactGroups, 'list-contact-groups')
   }
 ];

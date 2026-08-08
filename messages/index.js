@@ -4,8 +4,10 @@
  * Send via AppleScript, read via imsg CLI
  */
 
+const { z } = require('zod');
 const localClient = require('./local-client');
 const { formatError, formatSuccess, withErrorHandler } = require('../utils/error-handler');
+const { listOutput, listResult } = require('../utils/schemas');
 const { isLocalMode } = require('../mode');
 const { execFileSync } = require('child_process');
 const fs = require('fs');
@@ -66,34 +68,34 @@ function runImsg(args) {
 const messagesTools = [
   {
     name: 'list-chats',
+    outputSchema: listOutput('Recent conversations'),
+    title: 'List Chats',
     description: 'List recent iMessage/SMS conversations with contact names and last message preview',
     inputSchema: {
-      type: 'object',
-      properties: {
-        limit: { type: 'number', description: 'Number of conversations to show (default 20)' }
-      }
+      limit: z.number().int().min(1).max(200).optional().describe('Number of conversations to show (default 20)')
     },
+    annotations: {"readOnlyHint":true,"idempotentHint":true,"openWorldHint":false},
     handler: withErrorHandler(async ({ limit = 20 }) => {
       const modeError = requireLocalMode('list-chats');
       if (modeError) return modeError;
       const result = runImsg(['chats', '--limit', String(limit), '--json']);
-      return formatSuccess(JSON.stringify(result, null, 2));
+      // imsg emits JSONL, and runImsg unwraps a single line to a bare object.
+      const chats = Array.isArray(result) ? result : (result ? [result] : []);
+      return formatSuccess(JSON.stringify(chats, null, 2), listResult(chats));
     }, 'list-chats')
   },
   {
     name: 'read-messages',
+    title: 'Read Messages',
     description: 'Read message history for a specific iMessage/SMS conversation',
     inputSchema: {
-      type: 'object',
-      properties: {
-        chatId: { type: 'number', description: 'Chat ID (rowid from list-chats)' },
-        limit: { type: 'number', description: 'Number of messages (default 20)' },
-        start: { type: 'string', description: 'Start date (ISO 8601, optional)' },
-        end: { type: 'string', description: 'End date (ISO 8601, optional)' },
-        attachments: { type: 'boolean', description: 'Include attachment info (default false)' }
-      },
-      required: ['chatId']
+      chatId: z.number().int().describe('Chat ID (rowid from list-chats)'),
+      limit: z.number().int().min(1).max(500).optional().describe('Number of messages (default 20)'),
+      start: z.string().optional().describe('Start date (ISO 8601, optional)'),
+      end: z.string().optional().describe('End date (ISO 8601, optional)'),
+      attachments: z.boolean().optional().describe('Include attachment info (default false)')
     },
+    annotations: {"readOnlyHint":true,"idempotentHint":true,"openWorldHint":false},
     handler: withErrorHandler(async ({ chatId, limit = 20, start, end, attachments }) => {
       const modeError = requireLocalMode('read-messages');
       if (modeError) return modeError;
@@ -107,16 +109,14 @@ const messagesTools = [
   },
   {
     name: 'send-message',
+    title: 'Send Message',
     description: 'Send an iMessage or SMS. IMPORTANT: Always confirm with user before sending.',
     inputSchema: {
-      type: 'object',
-      properties: {
-        to: { type: 'string', description: 'Recipient phone number (with country code) or email' },
-        body: { type: 'string', description: 'Message content' },
-        file: { type: 'string', description: 'Path to file attachment (optional)' }
-      },
-      required: ['to', 'body']
+      to: z.string().describe('Recipient phone number (with country code) or email'),
+      body: z.string().describe('Message content'),
+      file: z.string().optional().describe('Path to file attachment (optional)')
     },
+    annotations: {"readOnlyHint":false,"destructiveHint":false,"idempotentHint":false,"openWorldHint":true},
     handler: withErrorHandler(async ({ to, body, file }) => {
       const modeError = requireLocalMode('send-message');
       if (modeError) return modeError;
@@ -138,15 +138,13 @@ const messagesTools = [
   },
   {
     name: 'react-message',
+    title: 'React To Message',
     description: 'Send a tapback reaction (love, like, dislike, laugh, emphasis, question)',
     inputSchema: {
-      type: 'object',
-      properties: {
-        chatId: { type: 'number', description: 'Chat ID' },
-        type: { type: 'string', description: 'Reaction type: love, like, dislike, laugh, emphasis, question' }
-      },
-      required: ['chatId', 'type']
+      chatId: z.number().int().describe('Chat ID'),
+      type: z.enum(['love', 'like', 'dislike', 'laugh', 'emphasis', 'question']).describe('Reaction type')
     },
+    annotations: {"readOnlyHint":false,"destructiveHint":false,"idempotentHint":false,"openWorldHint":true},
     handler: withErrorHandler(async ({ chatId, type }) => {
       const modeError = requireLocalMode('react-message');
       if (modeError) return modeError;

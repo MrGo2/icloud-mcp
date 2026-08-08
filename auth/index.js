@@ -3,6 +3,7 @@
  * Handles credential management and authentication status
  */
 
+const { z } = require('zod');
 const config = require('../config');
 const { formatSuccess, formatError } = require('../utils/error-handler');
 const { getMode, setMode, isLocalMode } = require('../mode');
@@ -137,38 +138,29 @@ Services now available: ${services}`
 const authTools = [
   {
     name: 'about',
+    title: 'About This Server',
     description: 'Returns information about this iCloud MCP server',
-    inputSchema: {
-      type: 'object',
-      properties: {},
-      required: []
-    },
+    inputSchema: {},
+    annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
     handler: handleAbout
   },
   {
     name: 'check-auth-status',
+    title: 'Check Auth Status',
     description: 'Check if iCloud credentials are configured correctly',
-    inputSchema: {
-      type: 'object',
-      properties: {},
-      required: []
-    },
+    inputSchema: {},
+    annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
     handler: handleCheckAuthStatus
   },
   {
     name: 'set-mode',
+    title: 'Switch Mode',
     description: 'Switch between LOCAL (AppleScript/macOS apps) and CLOUD (iCloud protocols) modes',
     inputSchema: {
-      type: 'object',
-      properties: {
-        mode: {
-          type: 'string',
-          enum: ['local', 'cloud'],
-          description: 'Mode to activate: "local" for AppleScript access to macOS apps, "cloud" for iCloud protocols'
-        }
-      },
-      required: ['mode']
+      mode: z.enum(['local', 'cloud'])
+        .describe('Mode to activate: "local" for AppleScript access to macOS apps, "cloud" for iCloud protocols')
     },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     handler: handleSetMode
   }
 ];

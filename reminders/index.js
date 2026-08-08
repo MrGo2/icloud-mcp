@@ -4,8 +4,10 @@
  * NOTE: Only available in LOCAL mode (AppleScript)
  */
 
+const { z } = require('zod');
 const localClient = require('./local-client');
 const { formatError } = require('../utils/error-handler');
+const { listOutput, listResult } = require('../utils/schemas');
 const { isLocalMode } = require('../mode');
 
 /**
@@ -21,12 +23,11 @@ function requireLocalMode(toolName) {
 const remindersTools = [
   {
     name: 'list-reminder-lists',
+    outputSchema: listOutput('list-reminder-lists'),
+    title: 'List Reminder Lists',
     description: 'Lists all reminder lists from Reminders.app (LOCAL mode only)',
-    inputSchema: {
-      type: 'object',
-      properties: {},
-      required: []
-    },
+    inputSchema: {},
+    annotations: {"readOnlyHint":true,"idempotentHint":true,"openWorldHint":false},
     handler: async () => {
       const modeError = requireLocalMode('list-reminder-lists');
       if (modeError) return modeError;
@@ -37,7 +38,8 @@ const remindersTools = [
           content: [{
             type: 'text',
             text: JSON.stringify(lists, null, 2)
-          }]
+          }],
+          structuredContent: listResult(lists)
         };
       } catch (error) {
         return formatError(error, 'list-reminder-lists');
@@ -46,25 +48,15 @@ const remindersTools = [
   },
   {
     name: 'list-reminders',
+    outputSchema: listOutput('list-reminders'),
+    title: 'List Reminders',
     description: 'Lists reminders from a specific list or all lists (LOCAL mode only)',
     inputSchema: {
-      type: 'object',
-      properties: {
-        listName: {
-          type: 'string',
-          description: 'Name of the reminder list (optional, lists all if not provided)'
-        },
-        includeCompleted: {
-          type: 'boolean',
-          description: 'Include completed reminders (default: false)'
-        },
-        count: {
-          type: 'number',
-          description: 'Maximum number of reminders to return (default: 50)'
-        }
-      },
-      required: []
+      listName: z.string().optional().describe('Name of the reminder list (optional, lists all if not provided)'),
+      includeCompleted: z.boolean().optional().describe('Include completed reminders (default: false)'),
+      count: z.number().int().min(1).max(200).optional().describe('Maximum number of reminders to return (default: 50)')
     },
+    annotations: {"readOnlyHint":true,"idempotentHint":true,"openWorldHint":false},
     handler: async ({ listName, includeCompleted = false, count = 50 }) => {
       const modeError = requireLocalMode('list-reminders');
       if (modeError) return modeError;
@@ -75,7 +67,8 @@ const remindersTools = [
           content: [{
             type: 'text',
             text: JSON.stringify(reminders, null, 2)
-          }]
+          }],
+          structuredContent: listResult(reminders)
         };
       } catch (error) {
         return formatError(error, 'list-reminders');
@@ -84,33 +77,16 @@ const remindersTools = [
   },
   {
     name: 'create-reminder',
+    title: 'Create Reminder',
     description: 'Creates a new reminder (LOCAL mode only)',
     inputSchema: {
-      type: 'object',
-      properties: {
-        name: {
-          type: 'string',
-          description: 'Reminder title (required)'
-        },
-        body: {
-          type: 'string',
-          description: 'Reminder notes/description'
-        },
-        dueDate: {
-          type: 'string',
-          description: 'Due date in ISO format (e.g., 2026-01-15T10:00:00)'
-        },
-        listName: {
-          type: 'string',
-          description: 'Name of the list to add to (default: Reminders)'
-        },
-        priority: {
-          type: 'number',
-          description: 'Priority level (0=none, 1=high, 5=medium, 9=low)'
-        }
-      },
-      required: ['name']
+      name: z.string().describe('Reminder title (required)'),
+      body: z.string().optional().describe('Reminder notes/description'),
+      dueDate: z.string().optional().describe('Due date in ISO format (e.g., 2026-01-15T10:00:00)'),
+      listName: z.string().optional().describe('Name of the list to add to (default: Reminders)'),
+      priority: z.number().int().min(0).max(9).optional().describe('Priority level (0=none, 1=high, 5=medium, 9=low)')
     },
+    annotations: {"readOnlyHint":false,"destructiveHint":false,"idempotentHint":false,"openWorldHint":false},
     handler: async (args) => {
       const modeError = requireLocalMode('create-reminder');
       if (modeError) return modeError;
@@ -130,33 +106,16 @@ const remindersTools = [
   },
   {
     name: 'update-reminder',
+    title: 'Update Reminder',
     description: 'Updates an existing reminder (LOCAL mode only)',
     inputSchema: {
-      type: 'object',
-      properties: {
-        reminderId: {
-          type: 'string',
-          description: 'ID of the reminder to update (required)'
-        },
-        name: {
-          type: 'string',
-          description: 'New title'
-        },
-        body: {
-          type: 'string',
-          description: 'New notes/description'
-        },
-        dueDate: {
-          type: 'string',
-          description: 'New due date in ISO format (set to null to remove)'
-        },
-        priority: {
-          type: 'number',
-          description: 'New priority level'
-        }
-      },
-      required: ['reminderId']
+      reminderId: z.string().describe('ID of the reminder to update (required)'),
+      name: z.string().optional().describe('New title'),
+      body: z.string().optional().describe('New notes/description'),
+      dueDate: z.string().optional().describe('New due date in ISO format'),
+      priority: z.number().int().min(0).max(9).optional().describe('New priority level')
     },
+    annotations: {"readOnlyHint":false,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false},
     handler: async ({ reminderId, ...updates }) => {
       const modeError = requireLocalMode('update-reminder');
       if (modeError) return modeError;
@@ -176,21 +135,13 @@ const remindersTools = [
   },
   {
     name: 'complete-reminder',
+    title: 'Complete Reminder',
     description: 'Marks a reminder as complete or incomplete (LOCAL mode only)',
     inputSchema: {
-      type: 'object',
-      properties: {
-        reminderId: {
-          type: 'string',
-          description: 'ID of the reminder (required)'
-        },
-        completed: {
-          type: 'boolean',
-          description: 'Set to true to complete, false to uncomplete (default: true)'
-        }
-      },
-      required: ['reminderId']
+      reminderId: z.string().describe('ID of the reminder (required)'),
+      completed: z.boolean().optional().describe('Set to true to complete, false to uncomplete (default: true)')
     },
+    annotations: {"readOnlyHint":false,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false},
     handler: async ({ reminderId, completed = true }) => {
       const modeError = requireLocalMode('complete-reminder');
       if (modeError) return modeError;
@@ -210,17 +161,12 @@ const remindersTools = [
   },
   {
     name: 'delete-reminder',
+    title: 'Delete Reminder',
     description: 'Deletes a reminder (LOCAL mode only)',
     inputSchema: {
-      type: 'object',
-      properties: {
-        reminderId: {
-          type: 'string',
-          description: 'ID of the reminder to delete (required)'
-        }
-      },
-      required: ['reminderId']
+      reminderId: z.string().describe('ID of the reminder to delete (required)')
     },
+    annotations: {"readOnlyHint":false,"destructiveHint":true,"idempotentHint":true,"openWorldHint":false},
     handler: async ({ reminderId }) => {
       const modeError = requireLocalMode('delete-reminder');
       if (modeError) return modeError;
@@ -240,21 +186,13 @@ const remindersTools = [
   },
   {
     name: 'search-reminders',
+    title: 'Search Reminders',
     description: 'Search reminders by text in name or body (LOCAL mode only)',
     inputSchema: {
-      type: 'object',
-      properties: {
-        query: {
-          type: 'string',
-          description: 'Search text (required)'
-        },
-        count: {
-          type: 'number',
-          description: 'Maximum results to return (default: 25)'
-        }
-      },
-      required: ['query']
+      query: z.string().describe('Search text (required)'),
+      count: z.number().int().min(1).max(200).optional().describe('Maximum results to return (default: 25)')
     },
+    annotations: {"readOnlyHint":true,"idempotentHint":true,"openWorldHint":false},
     handler: async ({ query, count = 25 }) => {
       const modeError = requireLocalMode('search-reminders');
       if (modeError) return modeError;

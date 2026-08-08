@@ -3,8 +3,10 @@
  * Provides calendar tools via CalDAV
  */
 
+const { z } = require('zod');
 const { listEvents, createEvent, updateEvent, deleteEvent, getCalendars } = require('./caldav-client');
 const { formatSuccess, formatError, withErrorHandler } = require('../utils/error-handler');
+const { listOutput, listResult } = require('../utils/schemas');
 const { formatDate } = require('../utils/date-utils');
 const config = require('../config');
 
@@ -18,7 +20,7 @@ async function handleListEvents(args) {
   const events = await listEvents(count, daysAhead);
 
   if (events.length === 0) {
-    return formatSuccess(`No upcoming events in the next ${daysAhead} days.`);
+    return formatSuccess(`No upcoming events in the next ${daysAhead} days.`, listResult([]));
   }
 
   const lines = events.map((event, i) => {
@@ -34,7 +36,7 @@ async function handleListEvents(args) {
     return line;
   });
 
-  return formatSuccess(`Upcoming events (${events.length}):\n\n${lines.join('\n\n')}`);
+  return formatSuccess(`Upcoming events (${events.length}):\n\n${lines.join('\n\n')}`, listResult(events));
 }
 
 /**
@@ -117,130 +119,77 @@ async function handleListCalendars() {
   const calendars = await getCalendars();
 
   if (calendars.length === 0) {
-    return formatSuccess('No calendars found.');
+    return formatSuccess('No calendars found.', listResult([]));
   }
 
   const lines = calendars.map((cal, i) =>
     `${i + 1}. ${cal.displayName}\n   URL: ${cal.url}`
   );
 
-  return formatSuccess(`Calendars (${calendars.length}):\n\n${lines.join('\n\n')}`);
+  return formatSuccess(`Calendars (${calendars.length}):\n\n${lines.join('\n\n')}`, listResult(calendars));
 }
 
 // Tool definitions
 const calendarTools = [
   {
     name: 'list-events',
+    outputSchema: listOutput('Calendar events'),
+    title: 'List Events',
     description: 'Lists upcoming calendar events',
     inputSchema: {
-      type: 'object',
-      properties: {
-        count: {
-          type: 'number',
-          description: 'Number of events to retrieve (default: 25, max: 50)'
-        },
-        daysAhead: {
-          type: 'number',
-          description: 'Number of days to look ahead (default: 30)'
-        }
-      },
-      required: []
+      count: z.number().int().min(1).max(50).optional().describe('Number of events to retrieve (default: 25, max: 50)'),
+      daysAhead: z.number().int().min(1).max(365).optional().describe('Number of days to look ahead (default: 30)')
     },
+    annotations: {"readOnlyHint":true,"idempotentHint":true,"openWorldHint":true},
     handler: withErrorHandler(handleListEvents, 'list-events')
   },
   {
     name: 'create-event',
+    title: 'Create Event',
     description: 'Creates a new calendar event',
     inputSchema: {
-      type: 'object',
-      properties: {
-        summary: {
-          type: 'string',
-          description: 'Event title/summary'
-        },
-        start: {
-          type: 'string',
-          description: 'Start date/time in ISO 8601 format (e.g., 2025-01-15T10:00:00)'
-        },
-        end: {
-          type: 'string',
-          description: 'End date/time in ISO 8601 format'
-        },
-        description: {
-          type: 'string',
-          description: 'Event description (optional)'
-        },
-        location: {
-          type: 'string',
-          description: 'Event location (optional)'
-        },
-        calendarUrl: {
-          type: 'string',
-          description: 'URL of the calendar to add event to (optional, uses default)'
-        }
-      },
-      required: ['summary', 'start', 'end']
+      summary: z.string().describe('Event title/summary'),
+      start: z.string().describe('Start date/time in ISO 8601 format (e.g., 2026-01-15T10:00:00)'),
+      end: z.string().describe('End date/time in ISO 8601 format'),
+      description: z.string().optional().describe('Event description (optional)'),
+      location: z.string().optional().describe('Event location (optional)'),
+      calendarUrl: z.string().optional().describe('URL of the calendar to add event to (optional, uses default)')
     },
+    annotations: {"readOnlyHint":false,"destructiveHint":false,"idempotentHint":false,"openWorldHint":true},
     handler: withErrorHandler(handleCreateEvent, 'create-event')
   },
   {
     name: 'update-event',
+    title: 'Update Event',
     description: 'Updates an existing calendar event. Only the fields you pass are changed; recurrence, invitees and alarms are preserved.',
     inputSchema: {
-      type: 'object',
-      properties: {
-        eventUrl: {
-          type: 'string',
-          description: 'URL of the event to update (from list-events output)'
-        },
-        summary: {
-          type: 'string',
-          description: 'New event title (optional)'
-        },
-        start: {
-          type: 'string',
-          description: 'New start date/time in ISO 8601 format (optional)'
-        },
-        end: {
-          type: 'string',
-          description: 'New end date/time in ISO 8601 format (optional)'
-        },
-        description: {
-          type: 'string',
-          description: 'New description (optional)'
-        },
-        location: {
-          type: 'string',
-          description: 'New location (optional)'
-        }
-      },
-      required: ['eventUrl']
+      eventUrl: z.string().describe('URL of the event to update (from list-events output)'),
+      summary: z.string().optional().describe('New event title (optional)'),
+      start: z.string().optional().describe('New start date/time in ISO 8601 format (optional)'),
+      end: z.string().optional().describe('New end date/time in ISO 8601 format (optional)'),
+      description: z.string().optional().describe('New description (optional)'),
+      location: z.string().optional().describe('New location (optional)')
     },
+    annotations: {"readOnlyHint":false,"destructiveHint":false,"idempotentHint":true,"openWorldHint":true},
     handler: withErrorHandler(handleUpdateEvent, 'update-event')
   },
   {
     name: 'delete-event',
+    title: 'Delete Event',
     description: 'Deletes a calendar event',
     inputSchema: {
-      type: 'object',
-      properties: {
-        eventUrl: {
-          type: 'string',
-          description: 'URL of the event to delete (from list-events output)'
-        }
-      },
-      required: ['eventUrl']
+      eventUrl: z.string().describe('URL of the event to delete (from list-events output)')
     },
+    annotations: {"readOnlyHint":false,"destructiveHint":true,"idempotentHint":true,"openWorldHint":true},
     handler: withErrorHandler(handleDeleteEvent, 'delete-event')
   },
   {
     name: 'list-calendars',
+    outputSchema: listOutput('Calendars'),
+    title: 'List Calendars',
     description: 'Lists all available calendars',
-    inputSchema: {
-      type: 'object',
-      properties: {},
-      required: []
-    },
+    inputSchema: {},
+    annotations: {"readOnlyHint":true,"idempotentHint":true,"openWorldHint":true},
     handler: withErrorHandler(handleListCalendars, 'list-calendars')
   }
 ];

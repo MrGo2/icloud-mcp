@@ -3,9 +3,11 @@
  * Provides email tools via IMAP/SMTP
  */
 
+const { z } = require('zod');
 const { listEmails, readEmail, searchEmails, markAsRead, listFolders } = require('./imap-client');
 const { sendEmail } = require('./smtp-client');
 const { formatSuccess, formatError, withErrorHandler } = require('../utils/error-handler');
+const { listOutput, listResult } = require('../utils/schemas');
 const { formatDate, formatRelative } = require('../utils/date-utils');
 const config = require('../config');
 
@@ -19,7 +21,7 @@ async function handleListEmails(args) {
   const emails = await listEmails(folder, count);
 
   if (emails.length === 0) {
-    return formatSuccess(`No emails found in ${folder}.`);
+    return formatSuccess(`No emails found in ${folder}.`, listResult([]));
   }
 
   const lines = emails.map((email, i) => {
@@ -28,7 +30,7 @@ async function handleListEmails(args) {
     return `${i + 1}. ${unread}${email.subject}\n   From: ${email.from}\n   Date: ${date}\n   UID: ${email.uid}`;
   });
 
-  return formatSuccess(`Emails in ${folder} (${emails.length}):\n\n${lines.join('\n\n')}`);
+  return formatSuccess(`Emails in ${folder} (${emails.length}):\n\n${lines.join('\n\n')}`, listResult(emails));
 }
 
 /**
@@ -112,7 +114,7 @@ async function handleSearchEmails(args) {
   const emails = await searchEmails(criteria, folder, count);
 
   if (emails.length === 0) {
-    return formatSuccess(`No emails found matching your search criteria in ${folder}.`);
+    return formatSuccess(`No emails found matching your search criteria in ${folder}.`, listResult([]));
   }
 
   const lines = emails.map((email, i) => {
@@ -121,7 +123,7 @@ async function handleSearchEmails(args) {
     return `${i + 1}. ${unread}${email.subject}\n   From: ${email.from}\n   Date: ${date}\n   UID: ${email.uid}`;
   });
 
-  return formatSuccess(`Search results in ${folder} (${emails.length}):\n\n${lines.join('\n\n')}`);
+  return formatSuccess(`Search results in ${folder} (${emails.length}):\n\n${lines.join('\n\n')}`, listResult(emails));
 }
 
 /**
@@ -148,150 +150,84 @@ async function handleListFolders() {
 
   const lines = folders.map(f => `- ${f.name}`);
 
-  return formatSuccess(`Email folders:\n\n${lines.join('\n')}`);
+  return formatSuccess(`Email folders:\n\n${lines.join('\n')}`, listResult(folders));
 }
 
 // Tool definitions
 const emailTools = [
   {
     name: 'list-emails',
+    outputSchema: listOutput('Emails'),
+    title: 'List Emails',
     description: 'Lists emails from a folder (default: inbox)',
     inputSchema: {
-      type: 'object',
-      properties: {
-        folder: {
-          type: 'string',
-          description: 'Email folder (inbox, sent, drafts, trash, archive, junk)'
-        },
-        count: {
-          type: 'number',
-          description: 'Number of emails to retrieve (default: 25, max: 50)'
-        }
-      },
-      required: []
+      folder: z.string().optional().describe('Email folder (inbox, sent, drafts, trash, archive, junk)'),
+      count: z.number().int().min(1).max(50).optional().describe('Number of emails to retrieve (default: 25, max: 50)')
     },
+    annotations: {"readOnlyHint":true,"idempotentHint":true,"openWorldHint":true},
     handler: withErrorHandler(handleListEmails, 'list-emails')
   },
   {
     name: 'read-email',
+    title: 'Read Email',
     description: 'Reads the full content of an email by UID',
     inputSchema: {
-      type: 'object',
-      properties: {
-        uid: {
-          type: 'string',
-          description: 'The UID of the email to read'
-        },
-        folder: {
-          type: 'string',
-          description: 'Email folder (default: inbox)'
-        }
-      },
-      required: ['uid']
+      uid: z.string().describe('The UID of the email to read'),
+      folder: z.string().optional().describe('Email folder (default: inbox)')
     },
+    annotations: {"readOnlyHint":true,"idempotentHint":true,"openWorldHint":true},
     handler: withErrorHandler(handleReadEmail, 'read-email')
   },
   {
     name: 'send-email',
+    title: 'Send Email',
     description: 'Composes and sends an email',
     inputSchema: {
-      type: 'object',
-      properties: {
-        to: {
-          type: 'string',
-          description: 'Recipient email address(es), comma-separated'
-        },
-        cc: {
-          type: 'string',
-          description: 'CC recipient(s), comma-separated'
-        },
-        bcc: {
-          type: 'string',
-          description: 'BCC recipient(s), comma-separated'
-        },
-        subject: {
-          type: 'string',
-          description: 'Email subject'
-        },
-        body: {
-          type: 'string',
-          description: 'Email body content'
-        },
-        isHtml: {
-          type: 'boolean',
-          description: 'Whether the body is HTML (default: false)'
-        }
-      },
-      required: ['to', 'subject', 'body']
+      to: z.string().describe('Recipient email address(es), comma-separated'),
+      cc: z.string().optional().describe('CC recipient(s), comma-separated'),
+      bcc: z.string().optional().describe('BCC recipient(s), comma-separated'),
+      subject: z.string().describe('Email subject'),
+      body: z.string().describe('Email body content'),
+      isHtml: z.boolean().optional().describe('Whether the body is HTML (default: false)')
     },
+    annotations: {"readOnlyHint":false,"destructiveHint":false,"idempotentHint":false,"openWorldHint":true},
     handler: withErrorHandler(handleSendEmail, 'send-email')
   },
   {
     name: 'search-emails',
+    outputSchema: listOutput('Matching emails'),
+    title: 'Search Emails',
     description: 'Search for emails by criteria',
     inputSchema: {
-      type: 'object',
-      properties: {
-        query: {
-          type: 'string',
-          description: 'Text to search in email content'
-        },
-        from: {
-          type: 'string',
-          description: 'Filter by sender'
-        },
-        subject: {
-          type: 'string',
-          description: 'Filter by subject'
-        },
-        folder: {
-          type: 'string',
-          description: 'Email folder to search (default: inbox)'
-        },
-        unreadOnly: {
-          type: 'boolean',
-          description: 'Only show unread emails'
-        },
-        count: {
-          type: 'number',
-          description: 'Max results (default: 25, max: 50)'
-        }
-      },
-      required: []
+      query: z.string().optional().describe('Text to search in email content'),
+      from: z.string().optional().describe('Filter by sender'),
+      subject: z.string().optional().describe('Filter by subject'),
+      folder: z.string().optional().describe('Email folder to search (default: inbox)'),
+      unreadOnly: z.boolean().optional().describe('Only show unread emails'),
+      count: z.number().int().min(1).max(50).optional().describe('Max results (default: 25, max: 50)')
     },
+    annotations: {"readOnlyHint":true,"idempotentHint":true,"openWorldHint":true},
     handler: withErrorHandler(handleSearchEmails, 'search-emails')
   },
   {
     name: 'mark-as-read',
+    title: 'Mark Email Read/Unread',
     description: 'Marks an email as read or unread',
     inputSchema: {
-      type: 'object',
-      properties: {
-        uid: {
-          type: 'string',
-          description: 'The UID of the email'
-        },
-        folder: {
-          type: 'string',
-          description: 'Email folder (default: inbox)'
-        },
-        isRead: {
-          type: 'boolean',
-          description: 'Mark as read (true) or unread (false). Default: true'
-        }
-      },
-      required: ['uid']
+      uid: z.string().describe('The UID of the email'),
+      folder: z.string().optional().describe('Email folder (default: inbox)'),
+      isRead: z.boolean().optional().describe('Mark as read (true) or unread (false). Default: true')
     },
+    annotations: {"readOnlyHint":false,"destructiveHint":false,"idempotentHint":true,"openWorldHint":true},
     handler: withErrorHandler(handleMarkAsRead, 'mark-as-read')
   },
   {
     name: 'list-folders',
+    outputSchema: listOutput('Mail folders'),
+    title: 'List Mail Folders',
     description: 'Lists all email folders',
-    inputSchema: {
-      type: 'object',
-      properties: {},
-      required: []
-    },
+    inputSchema: {},
+    annotations: {"readOnlyHint":true,"idempotentHint":true,"openWorldHint":true},
     handler: withErrorHandler(handleListFolders, 'list-folders')
   }
 ];
