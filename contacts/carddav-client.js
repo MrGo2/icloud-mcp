@@ -171,9 +171,9 @@ async function getAddressBooks() {
 }
 
 /**
- * List contacts
+ * Fetch every contact from every address book, sorted by display name
  */
-async function listContacts(count = 25) {
+async function fetchAllContacts() {
   const client = await getClient();
   const addressBooks = await client.fetchAddressBooks();
 
@@ -197,6 +197,14 @@ async function listContacts(count = 25) {
   // Sort by display name
   allContacts.sort((a, b) => a.displayName.localeCompare(b.displayName));
 
+  return allContacts;
+}
+
+/**
+ * List contacts
+ */
+async function listContacts(count = 25) {
+  const allContacts = await fetchAllContacts();
   return allContacts.slice(0, count);
 }
 
@@ -204,7 +212,9 @@ async function listContacts(count = 25) {
  * Search contacts
  */
 async function searchContacts(query, count = 25) {
-  const allContacts = await listContacts(count * 2);
+  // Search the FULL contact list; capping before filtering missed anyone
+  // past the first `count * 2` in alphabetical order (issue behind PR #4/#7)
+  const allContacts = await fetchAllContacts();
   const lowerQuery = query.toLowerCase();
 
   const matches = allContacts.filter(contact => {

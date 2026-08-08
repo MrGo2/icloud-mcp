@@ -3,7 +3,9 @@
  * Centralized configuration for all iCloud services
  */
 
-require('dotenv').config();
+// Load .env from the module dir, not the cwd — MCP clients like Claude
+// Desktop launch the server from an arbitrary working directory (issue #3)
+require('dotenv').config({ path: require('path').join(__dirname, '.env') });
 
 module.exports = {
   // Mode flags
