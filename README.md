@@ -1,337 +1,238 @@
-<p align="center">
-  <img src="https://img.icons8.com/color/96/icloud.png" alt="iCloud Logo" width="80"/>
-</p>
+# iCloud MCP
 
-<h1 align="center">Apple MCP Server</h1>
+Node.js server implementing Model Context Protocol (MCP) for Apple services.
 
-<p align="center">
-  <strong>Connect Claude to your Apple services via the Model Context Protocol</strong>
-</p>
+**The only MCP server that covers seven Apple services with two interchangeable backends.** Run it in **local mode** and it drives the native macOS apps through AppleScript — no credentials, no network, and it reaches Reminders, Notes, Messages and Safari that the iCloud protocols do not expose. Run it in **cloud mode** and it speaks IMAP/SMTP, CalDAV and CardDAV, so it works from any machine, not just a Mac. Switch between them at runtime with `set-mode`; no restart.
 
-<p align="center">
-  <a href="#features">Features</a> •
-  <a href="#installation">Installation</a> •
-  <a href="#configuration">Configuration</a> •
-  <a href="#tools">Tools</a> •
-  <a href="#architecture">Architecture</a>
-</p>
-
-<p align="center">
-  <img src="https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen" alt="Node Version"/>
-  <img src="https://img.shields.io/badge/license-MIT-blue" alt="License"/>
-  <img src="https://img.shields.io/badge/MCP-compatible-purple" alt="MCP Compatible"/>
-  <img src="https://img.shields.io/badge/macOS-AppleScript-orange" alt="macOS"/>
-  <img src="https://img.shields.io/badge/iCloud-IMAP%20%7C%20CalDAV%20%7C%20CardDAV-lightgrey" alt="Protocols"/>
-</p>
-
----
-
-## Overview
-
-This MCP server enables Claude to interact with your Apple services in two modes:
-
-### Local Mode (Default) - macOS Only
-Uses AppleScript to access native macOS apps. **Faster, works offline, more services.**
-
-| Service | Backend | Tools |
-|---------|---------|-------|
-| **Email** | Mail.app | 6 |
-| **Calendar** | Calendar.app | 5 |
-| **Contacts** | Contacts.app | 7 |
-| **Reminders** | Reminders.app | 7 |
-| **Notes** | Notes.app | 5 |
-| **Messages** | Messages.app + `imsg` | 4 |
-| **Safari** | Safari.app | 4 |
-
-All seven services honour the mode: LOCAL drives the macOS apps, CLOUD uses
-the iCloud protocols. `update-event` in CLOUD mode is experimental — the
-CalDAV update path is new and its live round-trip is not yet verified.
-
-### Cloud Mode - Works Anywhere
-Uses iCloud protocols (IMAP, CalDAV, CardDAV). Requires app-specific password.
-
-| Service | Protocol | Endpoint |
-|---------|----------|----------|
-| **Email** | IMAP / SMTP | `imap.mail.me.com` / `smtp.mail.me.com` |
-| **Calendar** | CalDAV | `caldav.icloud.com` |
-| **Contacts** | CardDAV | `contacts.icloud.com` |
-
----
+[![Install with NPX in VS Code](https://img.shields.io/badge/VS_Code-NPM-0098FF?style=flat-square&logo=visualstudiocode&logoColor=white)](https://insiders.vscode.dev/redirect/mcp/install?name=icloud&config=%7B%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22mcp-icloud%22%5D%7D)
 
 ## Features
 
-- **41 Tools** across 7 services (local-only tools return an error in cloud mode)
-- **Dual Mode** - switch between local (fast) and cloud (remote access)
-- **7 Services** - Email, Calendar, Contacts, Reminders, Notes, Messages, Safari
-- **Secure Authentication** - AppleScript permissions or app-specific passwords
-- **Full CRUD** - create, read, update, delete across services
+- **Seven services, one server** — Email, Calendar, Contacts, Reminders, Notes, Messages, Safari.
+- **Dual mode** — AppleScript locally, iCloud protocols remotely, switchable at runtime.
+- **41 tools**, each with a typed schema, a human title and behavioural annotations.
+- **Structured output** — every `list-*` tool returns machine-readable `structuredContent` alongside the text.
+- **No credentials in local mode** — macOS Automation permissions replace passwords entirely.
 
----
+## Access and security model
+
+- **stdio only.** The server speaks JSON-RPC over stdin/stdout. It opens no ports and listens on no socket.
+- **Credentials are never logged.** `ICLOUD_APP_PASSWORD` is read once at startup and passed only to the IMAP/SMTP/CalDAV/CardDAV clients. Diagnostics print a fixed mask, never the value.
+- **Credential storage is yours to choose.** A `.env` file next to the module for a manual install, or the `.mcpb` bundle's sensitive field, which the host stores in the macOS Keychain.
+- **Every tool argument is validated** against a zod schema before the handler runs. Arguments are also coerced at each AppleScript interpolation site, so a value that is not a number cannot reach a script template.
+- **Local mode needs no password at all.** macOS gates access per app through its own Automation permission prompts, which you can revoke at any time.
+
+## Tools
+
+Tools marked **local only** return an error in cloud mode, because the iCloud protocols do not expose those services.
+
+### Authentication
+
+- **about**
+  - Returns information about this server, the active mode and whether credentials are configured
+  - No input
+- **check-auth-status**
+  - Verifies credentials are usable for the active mode
+  - No input
+- **set-mode**
+  - Switches between local and cloud without restarting
+  - Input: `mode` (string, `local` or `cloud`)
+
+### Email
+
+- **list-emails** — Input: `folder` (string, optional), `count` (number, optional, max 50)
+- **read-email** — Input: `uid` (string), `folder` (string, optional)
+- **send-email** — Input: `to`, `subject`, `body` (strings); `cc`, `bcc` (strings, optional); `isHtml` (boolean, optional, cloud mode only)
+- **search-emails** — Input: `query`, `from`, `subject`, `folder` (strings, optional), `unreadOnly` (boolean, optional), `count` (number, optional)
+- **mark-as-read** — Input: `uid` (string), `folder` (string, optional), `isRead` (boolean, optional)
+- **list-folders** — No input
+
+### Calendar
+
+- **list-events** — Input: `count` (number, optional, max 50), `daysAhead` (number, optional)
+- **create-event** — Input: `summary`, `start`, `end` (strings, ISO 8601); `description`, `location` (optional); `calendarUrl` (cloud) or `calendarName` (local)
+- **update-event** — Input: `eventUrl` (string); any of `summary`, `start`, `end`, `description`, `location`. Only the fields you pass change
+- **delete-event** — Input: `eventUrl` (string)
+- **list-calendars** — No input
+
+### Contacts
+
+- **list-contacts** — Input: `count` (number, optional, max 50)
+- **search-contacts** — Input: `query` (string), `count` (number, optional). Matches name, organisation, email and phone; phone matching ignores formatting
+- **read-contact** — Input: `contactUrl` (string)
+- **create-contact** — Input: `displayName`, `firstName`, `lastName`, `email`, `phone`, `organization`, `title`, `notes` (all optional)
+- **delete-contact** — Input: `contactUrl` (string)
+- **list-contact-accounts** — No input — **local only**
+- **list-contact-groups** — Input: `accountId` (string, optional) — **local only**
+
+### Reminders — local only
+
+- **list-reminder-lists** — No input
+- **list-reminders** — Input: `listName` (string, optional), `includeCompleted` (boolean, optional), `count` (number, optional)
+- **create-reminder** — Input: `name` (string); `body`, `dueDate`, `listName` (optional); `priority` (number 0-9, optional)
+- **update-reminder** — Input: `reminderId` (string); any of `name`, `body`, `dueDate`, `priority`
+- **complete-reminder** — Input: `reminderId` (string), `completed` (boolean, optional)
+- **delete-reminder** — Input: `reminderId` (string)
+- **search-reminders** — Input: `query` (string), `count` (number, optional)
+
+### Notes — local only
+
+- **list-note-folders** — No input
+- **list-notes** — Input: `folderName` (string, optional), `count` (number, optional)
+- **read-note** — Input: `noteId` (string)
+- **create-note** — Input: `title` (string), `body` (string, optional), `folderName` (string, optional)
+- **search-notes** — Input: `query` (string), `count` (number, optional)
+
+### Messages — local only
+
+Reading requires the [`imsg`](https://github.com/steipete/imsg) CLI and Full Disk Access.
+
+- **list-chats** — Input: `limit` (number, optional)
+- **read-messages** — Input: `chatId` (number); `limit` (number, optional); `start`, `end` (ISO 8601, optional); `attachments` (boolean, optional)
+- **send-message** — Input: `to` (string), `body` (string), `file` (string, optional)
+- **react-message** — Input: `chatId` (number), `type` (`love`, `like`, `dislike`, `laugh`, `emphasis`, `question`)
+
+### Safari — local only
+
+- **list-safari-tabs** — No input
+- **get-current-safari-url** — No input
+- **open-safari-url** — Input: `url` (string), `inNewWindow` (boolean, optional)
+- **close-safari-tab** — Input: `windowIndex` (number, optional), `tabIndex` (number, optional)
+
+### Tool annotations (MCP hints)
+
+Every tool declares its behaviour explicitly rather than relying on defaults, which are deliberately pessimistic in the spec:
+
+- `readOnlyHint: true` — all `list-*`, `read-*`, `search-*` and `get-*` tools, plus `about` and `check-auth-status`.
+- `destructiveHint: true` — `delete-event`, `delete-contact`, `delete-reminder`, `close-safari-tab`.
+- `openWorldHint: true` — tools that reach the network or another person: all Email and Calendar tools, `send-message`, `react-message`, `open-safari-url`.
+- `idempotentHint: true` — the read-only tools plus `mark-as-read`, `complete-reminder`, `update-reminder`, `update-event`, `set-mode`.
 
 ## Installation
 
-```bash
-# Clone the repository
-git clone https://github.com/MrGo2/icloud-mcp.git
-cd icloud-mcp
+Requires Node.js 20 or newer.
 
-# Install dependencies
-npm install
+### Claude Desktop
 
-# Configure (optional for local mode)
-cp .env.example .env
-```
-
----
-
-## Configuration
-
-### Local Mode (Default)
-
-No configuration needed! Just run:
-
-```bash
-npm start
-```
-
-On first use, macOS will prompt for access to each app. Grant permission in **System Settings > Privacy & Security > Automation**.
-
-### Cloud Mode
-
-1. **Generate an App-Specific Password**
-   - Go to [appleid.apple.com](https://appleid.apple.com)
-   - Sign in → **Security** → **App-Specific Passwords** → **Generate**
-   - Name it `iCloud MCP` and copy the 16-character password
-
-2. **Configure `.env`**
-   ```env
-   USE_LOCAL_MODE=false
-   ICLOUD_EMAIL=your-email@icloud.com
-   ICLOUD_APP_PASSWORD=xxxx-xxxx-xxxx-xxxx
-   ```
-
-### Add to Claude Desktop
-
-Add to your Claude Desktop MCP settings (`~/Library/Application Support/Claude/claude_desktop_config.json`):
+Add to `claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
-    "apple": {
-      "command": "node",
-      "args": ["/path/to/icloud-mcp/index.js"]
+    "icloud": {
+      "command": "npx",
+      "args": ["-y", "mcp-icloud"]
     }
   }
 }
 ```
 
----
+For cloud mode, add credentials:
 
-## Tools
-
-### Authentication (3)
-
-| Tool | Description |
-|------|-------------|
-| `about` | Server information |
-| `check-auth-status` | Verify credentials |
-| `set-mode` | Switch between LOCAL and CLOUD at runtime |
-
-### Email (6)
-
-| Tool | Description |
-|------|-------------|
-| `list-emails` | List emails from a folder |
-| `read-email` | Read full email content |
-| `send-email` | Compose and send email |
-| `search-emails` | Search by criteria |
-| `mark-as-read` | Mark read/unread |
-| `list-folders` | List mail folders |
-
-### Calendar (5)
-
-| Tool | Description |
-|------|-------------|
-| `list-events` | List upcoming events |
-| `list-calendars` | List all calendars |
-| `create-event` | Create new event |
-| `update-event` | Update an event, preserving recurrence and invitees (cloud: experimental) |
-| `delete-event` | Delete an event |
-
-### Contacts (7)
-
-| Tool | Description |
-|------|-------------|
-| `list-contacts` | List contacts |
-| `search-contacts` | Search by name/email/phone |
-| `read-contact` | Get contact details |
-| `create-contact` | Create new contact |
-| `delete-contact` | Delete a contact |
-| `list-contact-accounts` | List accounts (iCloud, Google, ...) - local only |
-| `list-contact-groups` | List contact groups - local only |
-
-### Reminders (7) - Local Only
-
-| Tool | Description |
-|------|-------------|
-| `list-reminder-lists` | List all reminder lists |
-| `list-reminders` | List reminders from a list |
-| `create-reminder` | Create new reminder |
-| `update-reminder` | Update reminder |
-| `complete-reminder` | Mark as complete |
-| `delete-reminder` | Delete reminder |
-| `search-reminders` | Search reminders |
-
-### Notes (5) - Local Only
-
-| Tool | Description |
-|------|-------------|
-| `list-note-folders` | List note folders |
-| `list-notes` | List notes |
-| `read-note` | Read note content |
-| `create-note` | Create new note |
-| `search-notes` | Search notes |
-
-### Messages (4) - Local Only
-
-Reading requires the [`imsg`](https://github.com/steipete/imsg) CLI and Full Disk Access.
-
-| Tool | Description |
-|------|-------------|
-| `list-chats` | List recent conversations |
-| `read-messages` | Read a conversation's history |
-| `send-message` | Send iMessage/SMS |
-| `react-message` | Send a tapback reaction |
-
-### Safari (4) - Local Only
-
-| Tool | Description |
-|------|-------------|
-| `list-safari-tabs` | List open tabs |
-| `get-current-safari-url` | Get current tab URL |
-| `open-safari-url` | Open URL in new tab |
-| `close-safari-tab` | Close a tab |
-
----
-
-## Architecture
-
-```
-icloud-mcp/
-├── index.js              # MCP server (@modelcontextprotocol/server v2)
-├── mode.js               # Runtime mode state
-├── config.js             # Configuration
-├── auth/                 # Credential management + set-mode
-├── email/
-│   ├── imap-client.js    # Cloud: IMAP
-│   ├── smtp-client.js    # Cloud: SMTP
-│   ├── local-client.js   # Local: Mail.app
-│   └── index.js
-├── calendar/
-│   ├── caldav-client.js  # Cloud: CalDAV
-│   ├── local-client.js   # Local: Calendar.app
-│   └── index.js
-├── contacts/
-│   ├── carddav-client.js # Cloud: CardDAV
-│   ├── local-client.js   # Local: Contacts.app
-│   └── index.js
-├── reminders/            # Local only
-├── notes/                # Local only
-├── messages/             # Local only
-├── safari/               # Local only
-└── utils/
-    ├── applescript.js    # AppleScript executor
-    ├── date-utils.js
-    └── error-handler.js
+```json
+{
+  "mcpServers": {
+    "icloud": {
+      "command": "npx",
+      "args": ["-y", "mcp-icloud"],
+      "env": {
+        "USE_LOCAL_MODE": "false",
+        "ICLOUD_EMAIL": "you@icloud.com",
+        "ICLOUD_APP_PASSWORD": "xxxx-xxxx-xxxx-xxxx"
+      }
+    }
+  }
+}
 ```
 
----
+### Claude Code
 
-## Usage Examples
-
-### List Reminders
-```
-"Show me my reminders for today"
+```bash
+claude mcp add --transport stdio icloud -- npx -y mcp-icloud
 ```
 
-### Create a Reminder
+### VS Code
+
+Use the badge at the top of this README, or add the same `command`/`args` pair to your MCP settings.
+
+### Desktop extension (.mcpb)
+
+Download the `.mcpb` from [Releases](https://github.com/MrGo2/icloud-mcp/releases) and open it to sideload. The bundle prompts for the mode and, for cloud mode, stores the app-specific password in the macOS Keychain rather than a file.
+
+## Permissions and troubleshooting
+
+### macOS Automation prompts (local mode)
+
+The first time a tool touches an app, macOS asks whether the calling program may control it — once per app, not once per tool. Approve the prompt, or grant it later under **System Settings → Privacy & Security → Automation**.
+
+If you dismissed a prompt, calls to that app fail with an authorisation error (`osascript` error `-1743`, "not authorized to send Apple events"). macOS will not ask again on its own. Re-enable the checkbox under Automation, or reset the decisions:
+
+```bash
+tccutil reset AppleEvents
 ```
-"Create a reminder to buy milk tomorrow at 5pm"
+
+That clears Automation permissions for every app, so expect the prompts to return on next use.
+
+### Full Disk Access (reading messages)
+
+`list-chats` and `read-messages` read the Messages database through the `imsg` CLI, which is gated by **Full Disk Access**, not Automation. Grant it to the program that launches the server (Claude Desktop, your terminal, or your editor) under **System Settings → Privacy & Security → Full Disk Access**. Without it, those tools report that Full Disk Access is required.
+
+If `imsg` is installed somewhere unusual, point at it explicitly:
+
+```bash
+export ICLOUD_MCP_IMSG_PATH=/opt/homebrew/bin/imsg
 ```
 
-### Send a Message
-```
-"Send an iMessage to +34612345678 saying I'll be there in 10 minutes"
-```
+The server otherwise looks in `ICLOUD_MCP_IMSG_PATH`, `IMSG_PATH`, both Homebrew prefixes, and finally `PATH`.
 
-### Check Safari Tabs
-```
-"What tabs do I have open in Safari?"
-```
+### Known limitation: large mailboxes
 
-### Send Email
-```
-"Send an email to john@example.com with subject 'Meeting Tomorrow'"
-```
+Mail.app tools iterate messages through AppleScript, which is slow on very large mailboxes and can exceed the Apple Event timeout before returning. Narrow the request with `folder` and a smaller `count`, or use cloud mode, where IMAP does the filtering server-side. This is a property of the AppleScript bridge, not something the server can work around.
 
----
+### App-specific password (cloud mode)
 
-## Mode Comparison
+Cloud mode needs an app-specific password — your normal Apple ID password will not work, and neither will it work if two-factor authentication is off.
 
-| Feature | Local Mode | Cloud Mode |
-|---------|------------|------------|
-| Speed | Fast (~100ms) | Slower (~500ms+) |
-| Works offline | ✅ | ❌ |
-| Remote access | ❌ | ✅ |
-| Services | 7 | 3 |
-| Tools | 41 advertised | 41 advertised, 23 usable |
-| Requirements | macOS | App-specific password |
+1. Sign in at [appleid.apple.com](https://appleid.apple.com).
+2. Go to **Sign-In and Security → App-Specific Passwords**.
+3. Generate one and name it, for example, "iCloud MCP".
+4. Put it in `ICLOUD_APP_PASSWORD`, together with `ICLOUD_EMAIL`.
 
----
+Revoke it from the same page if it is ever exposed.
 
-## Limitations
+### Checking what the server thinks
 
-| Feature | Status | Reason |
-|---------|--------|--------|
-| Read Messages | ✅ | Via the `imsg` CLI (needs Full Disk Access) |
-| Edit Notes | ⚠️ Limited | AppleScript limitation |
-| iCloud Drive | ❌ | Requires CloudKit |
-| Find My | ❌ | Internal API only |
+Call `about` for the active mode and service list, and `check-auth-status` to confirm credentials are usable in the current mode.
 
----
+## Requirements
 
-## Troubleshooting
+- **Node.js 20+**
+- **Local mode**: macOS, with the relevant apps installed. `imsg` and Full Disk Access for reading messages.
+- **Cloud mode**: any OS. An iCloud account with two-factor authentication and an app-specific password. Covers Email, Calendar and Contacts only.
 
-| Issue | Solution |
-|-------|----------|
-| **Permission denied** | Grant access in System Settings > Privacy & Security > Automation |
-| **App not responding** | Make sure the app (Mail, Calendar, etc.) is running |
-| **Authentication failed** (cloud) | Use app-specific password, not Apple ID password |
-| **IMAP timeout** (cloud) | iCloud servers can be slow - retry |
+## Configuration
 
----
+| Variable | Default | Purpose |
+|---|---|---|
+| `USE_LOCAL_MODE` | `true` | `false` selects cloud mode |
+| `ICLOUD_EMAIL` | — | iCloud address, cloud mode only |
+| `ICLOUD_APP_PASSWORD` | — | App-specific password, cloud mode only |
+| `ICLOUD_MCP_IMSG_PATH` | — | Explicit path to the `imsg` binary |
+
+Read from the environment, or from a `.env` file beside the module. See `.env.example`.
 
 ## Development
 
+`pnpm` is the supported package manager; `pnpm-lock.yaml` is the committed lockfile.
+
 ```bash
-# Run in local mode (default)
-npm start
-
-# Run in cloud mode
-USE_LOCAL_MODE=false npm start
-
-# Test with MCP Inspector
-npm run inspect
+pnpm install
+pnpm test          # unit + contract suites, and a live stdio session
+pnpm run inspect   # drive the server with the MCP Inspector
 ```
 
----
+The test suites stub `osascript` and the `imsg` CLI, so they touch no real mail, calendar or message data and run on any OS.
 
 ## License
 
-MIT © [Carlos Lorenzo](https://github.com/MrGo2)
-
----
-
-<p align="center">
-  <sub>Built for use with <a href="https://claude.ai">Claude</a> and the <a href="https://modelcontextprotocol.io">Model Context Protocol</a></sub>
-</p>
+MIT — see [LICENSE](LICENSE).

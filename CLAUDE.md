@@ -233,4 +233,17 @@ carried: framing, notification handling, and unvalidated arguments.
 - **Mode switching**: `set-mode` fires `notifications/tools/list_changed` via
   the listener registered in `mode.js`.
 
-Requires **Node >= 20**. Dependencies are managed with **pnpm** (`pnpm-lock.yaml`).
+Requires **Node >= 20**. Dependencies are managed with **pnpm** (`pnpm-lock.yaml` is the
+committed lockfile).
+
+## Distribution
+
+| Fact | Value |
+|---|---|
+| npm package | `mcp-icloud` |
+| MCP registry name | `io.github.mrgo2/icloud-mcp` (`mcpName` in package.json, `server.json` at the repo root) |
+| MCP server name (wire) | `icloud-mcp` — reported in `initialize`, unchanged by the npm rename |
+| Desktop bundle | `mcpb pack` produces `icloud-mcp.mcpb`; `.mcpbignore` keeps `test/`, `docs/`, `.claude/` and `.remember/` out of it |
+| CI | `.github/workflows/ci.yml` — pnpm, Node 20 + 22 on ubuntu, plus an inspector smoke on 22 |
+
+Release artifacts (`*.mcpb`, `*.tgz`) are gitignored: they are built, not source.
