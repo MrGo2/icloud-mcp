@@ -20,6 +20,7 @@
 const readline = require('readline');
 const config = require('./config');
 const { getMode } = require('./mode');
+const { validateArgs } = require('./utils/validate');
 
 // Import all modules - tools are always available, handlers check mode
 const { authTools } = require('./auth');
@@ -58,6 +59,11 @@ function getServerInfo() {
 async function handleRequest(request) {
   const { method, params, id } = request;
 
+  // Notifications carry no id and MUST NOT be answered at all.
+  if (typeof method === 'string' && method.startsWith('notifications/')) {
+    return null;
+  }
+
   try {
     switch (method) {
       case 'initialize':
@@ -73,9 +79,8 @@ async function handleRequest(request) {
           }
         };
 
-      case 'notifications/initialized':
-        // No response needed for notifications
-        return null;
+      case 'ping':
+        return { jsonrpc: '2.0', id, result: {} };
 
       case 'tools/list':
         return {
@@ -90,7 +95,7 @@ async function handleRequest(request) {
           }
         };
 
-      case 'tools/call':
+      case 'tools/call': {
         const toolName = params?.name;
         const toolArgs = params?.arguments || {};
 
@@ -100,7 +105,7 @@ async function handleRequest(request) {
             jsonrpc: '2.0',
             id,
             error: {
-              code: -32601,
+              code: -32602,
               message: `Unknown tool: ${toolName}`
             }
           };
@@ -108,13 +113,24 @@ async function handleRequest(request) {
 
         console.error(`[icloud-mcp] Calling tool: ${toolName}`);
 
-        const result = await tool.handler(toolArgs);
-
-        return {
-          jsonrpc: '2.0',
-          id,
-          result
-        };
+        // Tool failures are reported in the result with isError, not as a
+        // protocol error: the model needs to see them and can retry.
+        try {
+          const args = validateArgs(toolName, tool.inputSchema, toolArgs);
+          const result = await tool.handler(args);
+          return { jsonrpc: '2.0', id, result };
+        } catch (error) {
+          console.error(`[icloud-mcp] Tool ${toolName} failed:`, error.message);
+          return {
+            jsonrpc: '2.0',
+            id,
+            result: {
+              content: [{ type: 'text', text: `Error: ${error.message}` }],
+              isError: true
+            }
+          };
+        }
+      }
 
       default:
         return {
@@ -167,26 +183,34 @@ function startServer() {
     terminal: false
   });
 
-  let buffer = '';
-
+  // MCP stdio framing is one complete JSON message per line, so each line is
+  // parsed on its own. A malformed line is dropped rather than accumulated -
+  // buffering it would poison every request that followed.
   rl.on('line', async (line) => {
-    buffer += line;
+    const trimmed = line.trim();
+    if (!trimmed) return;
+
+    let request;
+    try {
+      request = JSON.parse(trimmed);
+    } catch (e) {
+      console.error('[icloud-mcp] Ignoring malformed JSON line:', e.message);
+      return;
+    }
 
     try {
-      const request = JSON.parse(buffer);
-      buffer = '';
-
       const response = await handleRequest(request);
-
       if (response) {
-        const responseStr = JSON.stringify(response);
-        process.stdout.write(responseStr + '\n');
+        process.stdout.write(JSON.stringify(response) + '\n');
       }
     } catch (e) {
-      // Not a complete JSON yet, continue buffering
-      if (!(e instanceof SyntaxError)) {
-        console.error('[icloud-mcp] Parse error:', e.message);
-        buffer = '';
+      console.error('[icloud-mcp] Unhandled error:', e.message);
+      if (request.id !== undefined) {
+        process.stdout.write(JSON.stringify({
+          jsonrpc: '2.0',
+          id: request.id,
+          error: { code: -32603, message: e.message }
+        }) + '\n');
       }
     }
   });

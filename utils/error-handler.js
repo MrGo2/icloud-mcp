@@ -13,7 +13,8 @@ function formatError(error, context = '') {
       content: [{
         type: 'text',
         text: `${prefix}Authentication failed. Please verify your iCloud credentials in .env file.\n\nTo set up:\n1. Go to https://appleid.apple.com\n2. Security → App-Specific Passwords → Generate\n3. Copy the password to ICLOUD_APP_PASSWORD in .env`
-      }]
+      }],
+      isError: true
     };
   }
 
@@ -21,7 +22,8 @@ function formatError(error, context = '') {
     content: [{
       type: 'text',
       text: `${prefix}Error: ${error.message || 'Unknown error occurred'}`
-    }]
+    }],
+    isError: true
   };
 }
 
