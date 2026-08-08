@@ -8,8 +8,9 @@ on:
 
 jobs:
   test:
-    # The suites stub osascript and the imsg CLI, so no macOS runner is needed.
-    runs-on: ubuntu-latest
+    # macOS runner: mode.js hard-blocks LOCAL mode on other platforms, and the
+    # suites exercise mode switching. Free for public repos.
+    runs-on: macos-latest
     strategy:
       fail-fast: false
       matrix:
@@ -18,8 +19,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Enable corepack
-        run: corepack enable
+      # Pinned to pnpm 10: pnpm 11 requires Node >= 22.13, which would break
+      # the Node 20 leg of the matrix. Lockfile v9.0 is shared by both majors.
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
 
       - uses: actions/setup-node@v4
         with:
@@ -35,12 +39,13 @@ jobs:
   inspector:
     # Independent check that the server speaks MCP: the official inspector
     # drives a real stdio session and lists the tools.
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Enable corepack
-        run: corepack enable
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
 
       - uses: actions/setup-node@v4
         with:
