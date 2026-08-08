@@ -1,0 +1,43 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.mrgo2/icloud-mcp",
+  "description": "MCP server for Apple services - Email, Calendar, Contacts, Reminders, Notes, Messages and Safari - with dual local (AppleScript) and cloud (IMAP/CalDAV/CardDAV) modes",
+  "version": "2.1.0",
+  "repository": {
+    "url": "https://github.com/MrGo2/icloud-mcp",
+    "source": "github"
+  },
+  "websiteUrl": "https://github.com/MrGo2/icloud-mcp#readme",
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "mcp-icloud",
+      "version": "2.1.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "USE_LOCAL_MODE",
+          "description": "true (default) drives the macOS apps via AppleScript; false uses the iCloud protocols",
+          "isRequired": false,
+          "isSecret": false,
+          "default": "true"
+        },
+        {
+          "name": "ICLOUD_EMAIL",
+          "description": "iCloud address, required only for cloud mode",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "ICLOUD_APP_PASSWORD",
+          "description": "App-specific password from appleid.apple.com, required only for cloud mode",
+          "isRequired": false,
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}
