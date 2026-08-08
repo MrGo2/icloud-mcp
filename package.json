@@ -8,6 +8,7 @@
   },
   "scripts": {
     "start": "node index.js",
+    "test": "node test/security.test.js",
     "test-mode": "USE_TEST_MODE=true node index.js",
     "inspect": "npx @modelcontextprotocol/inspector node index.js"
   },
