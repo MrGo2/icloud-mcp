@@ -1,6 +1,6 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.mrgo2/icloud-mcp",
+  "name": "io.github.MrGo2/icloud-mcp",
   "description": "Apple Mail, Calendar, Contacts, Reminders, Notes, Messages and Safari via AppleScript or iCloud",
   "version": "2.1.0",
   "repository": {
