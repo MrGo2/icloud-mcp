@@ -1,11 +1,28 @@
 {
-  "name": "icloud-mcp",
+  "name": "mcp-icloud",
+  "mcpName": "io.github.mrgo2/icloud-mcp",
   "version": "2.1.0",
-  "description": "MCP server for Apple services: Email, Calendar, Contacts, Reminders, Notes, Messages and Safari, via macOS apps (local) or iCloud protocols (cloud)",
+  "description": "MCP server for Apple services - Email, Calendar, Contacts, Reminders, Notes, Messages and Safari - with dual local (AppleScript) and cloud (IMAP/CalDAV/CardDAV) modes",
   "main": "index.js",
   "bin": {
     "icloud-mcp": "index.js"
   },
+  "files": [
+    "index.js",
+    "mode.js",
+    "config.js",
+    "auth/",
+    "email/",
+    "calendar/",
+    "contacts/",
+    "reminders/",
+    "notes/",
+    "messages/",
+    "safari/",
+    "utils/",
+    "LICENSE",
+    "README.md"
+  ],
   "scripts": {
     "start": "node index.js",
     "test": "node test/security.test.js && node test/local-output.test.js",
@@ -26,13 +43,19 @@
   },
   "keywords": [
     "mcp",
-    "modelcontextprotocol",
+    "mcp-server",
+    "model-context-protocol",
     "icloud",
     "apple",
     "applescript",
-    "email",
-    "calendar",
-    "contacts"
+    "imap",
+    "caldav",
+    "carddav",
+    "claude",
+    "reminders",
+    "notes",
+    "imessage",
+    "safari"
   ],
   "author": "Carlos Lorenzo",
   "license": "MIT",
