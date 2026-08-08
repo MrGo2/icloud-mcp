@@ -14,6 +14,7 @@ const fs = require('fs');
 // launched by a GUI client often has a minimal PATH, so probe both.
 const IMSG_CANDIDATES = [
   process.env.ICLOUD_MCP_IMSG_PATH,
+  process.env.IMSG_PATH,
   '/opt/homebrew/bin/imsg',
   '/usr/local/bin/imsg'
 ].filter(Boolean);

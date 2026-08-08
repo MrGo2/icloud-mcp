@@ -6,8 +6,8 @@ This MCP server provides Claude with access to Apple services via two modes:
 
 | Mode | Description | Services | Requirements |
 |------|-------------|----------|--------------|
-| **LOCAL** (default) | AppleScript access to macOS apps | 7 services, 40 tools | macOS |
-| **CLOUD** | iCloud protocols (IMAP, CalDAV, CardDAV) | 3 services, 40 tools* | App-specific password |
+| **LOCAL** (default) | AppleScript access to macOS apps | 7 services, 41 tools | macOS |
+| **CLOUD** | iCloud protocols (IMAP, CalDAV, CardDAV) | 3 services, 41 tools* | App-specific password |
 
 \* In CLOUD mode, local-only tools (Reminders, Notes, Messages, Safari) return an error when called.
 
@@ -24,7 +24,7 @@ Use `set-mode` to switch between modes **without restarting**:
 | Service | Protocol | Tools |
 |---------|----------|-------|
 | **Email** | IMAP/SMTP (not yet local) | 6 |
-| **Calendar** | CalDAV (not yet local) | 4 |
+| **Calendar** | CalDAV (not yet local) | 5 |
 | **Contacts** | Contacts.app (AppleScript) | 7 |
 | **Reminders** | Reminders.app (AppleScript) | 7 |
 | **Notes** | Notes.app (AppleScript) | 5 |
@@ -106,7 +106,7 @@ icloud-mcp/
     └── error-handler.js
 ```
 
-## Tools (40 total)
+## Tools (41 total)
 
 ### Auth (3)
 - `about` - Server information
@@ -121,10 +121,11 @@ icloud-mcp/
 - `mark-as-read` - Mark read/unread
 - `list-folders` - List mail folders
 
-### Calendar (4)
+### Calendar (5)
 - `list-events` - List upcoming events
 - `list-calendars` - List calendars
 - `create-event` - Create event
+- `update-event` - Update event (cloud/CalDAV; preserves RRULE, attendees, alarms)
 - `delete-event` - Delete event
 
 ### Contacts (7)

@@ -36,7 +36,7 @@ Uses AppleScript to access native macOS apps. **Faster, works offline, more serv
 | Service | Backend | Tools |
 |---------|---------|-------|
 | **Email** | IMAP / SMTP \* | 6 |
-| **Calendar** | CalDAV \* | 4 |
+| **Calendar** | CalDAV \* | 5 |
 | **Contacts** | Contacts.app | 7 |
 | **Reminders** | Reminders.app | 7 |
 | **Notes** | Notes.app | 5 |
@@ -59,7 +59,7 @@ Uses iCloud protocols (IMAP, CalDAV, CardDAV). Requires app-specific password.
 
 ## Features
 
-- **40 Tools** across 7 services (local-only tools return an error in cloud mode)
+- **41 Tools** across 7 services (local-only tools return an error in cloud mode)
 - **Dual Mode** - switch between local (fast) and cloud (remote access)
 - **7 Services** - Email, Calendar, Contacts, Reminders, Notes, Messages, Safari
 - **Secure Authentication** - AppleScript permissions or app-specific passwords
@@ -147,13 +147,14 @@ Add to your Claude Desktop MCP settings (`~/Library/Application Support/Claude/c
 | `mark-as-read` | Mark read/unread |
 | `list-folders` | List mail folders |
 
-### Calendar (4)
+### Calendar (5)
 
 | Tool | Description |
 |------|-------------|
 | `list-events` | List upcoming events |
 | `list-calendars` | List all calendars |
 | `create-event` | Create new event |
+| `update-event` | Update an event, preserving recurrence and invitees |
 | `delete-event` | Delete an event |
 
 ### Contacts (7)
@@ -282,7 +283,7 @@ icloud-mcp/
 | Works offline | ✅ | ❌ |
 | Remote access | ❌ | ✅ |
 | Services | 7 | 3 |
-| Tools | 40 advertised | 40 advertised, 22 usable |
+| Tools | 41 advertised | 41 advertised, 23 usable |
 | Requirements | macOS | App-specific password |
 
 ---
