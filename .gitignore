@@ -21,3 +21,7 @@ Thumbs.db
 # Build output
 dist/
 build/
+
+# Release artifacts (built, not source)
+*.mcpb
+*.tgz

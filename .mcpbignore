@@ -1,0 +1,33 @@
+# Files excluded from the .mcpb release bundle.
+# Without this, `mcpb pack` ships everything in the working directory - including
+# internal planning docs, local editor settings and the test suite.
+
+# Tests and internal docs
+test/
+docs/
+
+# Local tooling / agent state
+.claude/
+.remember/
+.github/
+
+# Source control and env
+.git/
+.gitignore
+.mcpbignore
+.npmrc
+.env
+.env.*
+!.env.example
+
+# Build and release artifacts
+*.mcpb
+*.tgz
+pnpm-lock.yaml
+package-lock.json
+
+# Registry / CI descriptors that are not needed at runtime
+server.json
+
+# OS noise
+.DS_Store
