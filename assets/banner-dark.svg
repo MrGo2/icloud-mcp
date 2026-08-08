@@ -14,7 +14,7 @@
     <text x="80" y="128" font-size="58" font-weight="700" fill="#e6edf3">icloud-mcp</text>
     <rect x="82" y="148" width="330" height="4" rx="2" fill="url(#accent)"/>
     <text x="80" y="192" font-size="21" fill="#8b949e">Mail · Calendar · Contacts · Reminders · Notes · Messages · Safari</text>
-    <text x="80" y="226" font-size="17" fill="#6e7681">One MCP server, two modes — AppleScript on your Mac, or iCloud from anywhere</text>
+    <text x="80" y="226" font-size="17" fill="#6e7681">One MCP server, two modes: AppleScript on your Mac, or iCloud from anywhere</text>
     <g font-size="34" text-anchor="middle">
       <g transform="translate(795,90)">
         <rect x="-31" y="-31" width="62" height="62" rx="15" fill="#1c2333" stroke="#30363d"/>
