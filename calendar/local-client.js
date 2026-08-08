@@ -3,74 +3,68 @@
  * Accesses Calendar.app via AppleScript
  */
 
-const { runAppleScript, runJXA, escapeAppleScript, escapeJXA, formatAppleScriptDate } = require('../utils/applescript');
+const { runAppleScript, runJXA, escapeAppleScript, escapeJXA, asInt, formatAppleScriptDate } = require('../utils/applescript');
 const config = require('../config');
 
-// iCloud calendars to query
-const ICLOUD_CALENDARS = ['Privado', 'Family', 'Sara', 'Trips', 'Yoli_Carlos'];
-
 /**
- * List upcoming events from iCloud calendars
+ * List upcoming events from every calendar
  * @param {number} count - Number of events to retrieve
  * @param {number} daysAhead - Number of days to look ahead
  * @returns {Promise<Array>} - List of events
  */
 async function listEvents(count = 25, daysAhead = 30) {
   const now = new Date();
-  const future = new Date(now.getTime() + daysAhead * 24 * 60 * 60 * 1000);
+  const future = new Date(now.getTime() + asInt(daysAhead, 30) * 24 * 60 * 60 * 1000);
 
-  // Use batch property access (only essential fields for speed)
+  // Batch property access: per-event JXA calls trigger AppleEvent errors.
+  // The window is filtered inside the script so a busy calendar cannot push
+  // upcoming events out of the result set before we ever see them.
   const script = `
     const calendar = Application('Calendar');
-    const targetCals = ${JSON.stringify(ICLOUD_CALENDARS)};
-    const calNames = calendar.calendars.name();
+    const cals = calendar.calendars;
+    const calNames = cals.name();
+    const rangeStart = new Date(${JSON.stringify(now.toISOString())});
+    const rangeEnd = new Date(${JSON.stringify(future.toISOString())});
     let allEvents = [];
 
-    for (let i = 0; i < targetCals.length; i++) {
-      const idx = calNames.indexOf(targetCals[i]);
-      if (idx === -1) continue;
-
+    for (let i = 0; i < calNames.length; i++) {
       try {
-        const cal = calendar.calendars[idx];
-        const evts = cal.events;
+        const evts = cals[i].events;
         const uids = evts.uid();
         const summaries = evts.summary();
         const starts = evts.startDate();
+        const ends = evts.endDate();
+        const locations = evts.location();
 
-        const limit = Math.min(uids.length, 50);
-        for (let j = 0; j < limit; j++) {
+        for (let j = 0; j < uids.length; j++) {
+          const start = starts[j];
+          if (!start) continue;
+          if (start < rangeStart || start > rangeEnd) continue;
+
           allEvents.push({
             id: uids[j],
             summary: summaries[j] || '',
-            startDate: starts[j] ? starts[j].toISOString() : null,
-            calendar: targetCals[i]
+            startDate: start.toISOString(),
+            endDate: ends[j] ? ends[j].toISOString() : null,
+            location: locations[j] || '',
+            calendar: calNames[i]
           });
         }
-      } catch (e) {}
+      } catch (e) {
+        // One unreadable calendar must not hide the rest, but say which.
+        console.log('calendar skipped: ' + calNames[i] + ' (' + e + ')');
+      }
     }
 
     JSON.stringify(allEvents);
   `;
 
-  try {
-    const result = await runJXA(script);
-    if (!result) return [];
+  const result = await runJXA(script);
+  if (!result) return [];
 
-    let events = JSON.parse(result);
-
-    // Filter to date range and sort
-    events = events.filter(e => {
-      if (!e.startDate) return false;
-      const start = new Date(e.startDate);
-      return start >= now && start <= future;
-    });
-
-    events.sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
-    return events.slice(0, count);
-  } catch (error) {
-    console.error('Calendar listEvents error:', error.message);
-    return [];
-  }
+  const events = JSON.parse(result);
+  events.sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
+  return events.slice(0, asInt(count, 25));
 }
 
 /**

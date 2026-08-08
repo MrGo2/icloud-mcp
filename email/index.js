@@ -4,12 +4,28 @@
  */
 
 const { z } = require('zod');
-const { listEmails, readEmail, searchEmails, markAsRead, listFolders } = require('./imap-client');
-const { sendEmail } = require('./smtp-client');
+const cloudClient = require('./imap-client');
+const smtpClient = require('./smtp-client');
+const localClient = require('./local-client');
+const { isLocalMode } = require('../mode');
 const { formatSuccess, formatError, withErrorHandler } = require('../utils/error-handler');
 const { listOutput, listResult } = require('../utils/schemas');
 const { formatDate, formatRelative } = require('../utils/date-utils');
 const config = require('../config');
+
+/**
+ * Normalize a message summary to one shape regardless of mode.
+ *
+ * Cloud (IMAP) returns a uid plus a raw `flags` array; local (Mail.app)
+ * returns an id plus a boolean `read`. Downstream sees `ref` (the handle you
+ * pass back to read/mark) and `unread`.
+ */
+function normalizeEmail(email, local) {
+  if (local) {
+    return { ...email, ref: email.id, unread: email.read === false };
+  }
+  return { ...email, ref: email.uid, unread: !(email.flags || []).includes('\\Seen') };
+}
 
 /**
  * Handler: List emails
@@ -18,16 +34,19 @@ async function handleListEmails(args) {
   const folder = args.folder || 'inbox';
   const count = Math.min(args.count || 25, config.DEFAULTS.MAX_RESULTS);
 
-  const emails = await listEmails(folder, count);
+  const local = isLocalMode();
+  const client = local ? localClient : cloudClient;
+
+  const emails = (await client.listEmails(folder, count)).map(e => normalizeEmail(e, local));
 
   if (emails.length === 0) {
     return formatSuccess(`No emails found in ${folder}.`, listResult([]));
   }
 
   const lines = emails.map((email, i) => {
-    const unread = !email.flags.includes('\\Seen') ? '[UNREAD] ' : '';
+    const unread = email.unread ? '[UNREAD] ' : '';
     const date = formatRelative(new Date(email.date));
-    return `${i + 1}. ${unread}${email.subject}\n   From: ${email.from}\n   Date: ${date}\n   UID: ${email.uid}`;
+    return `${i + 1}. ${unread}${email.subject}\n   From: ${email.from}\n   Date: ${date}\n   ${local ? 'ID' : 'UID'}: ${email.ref}`;
   });
 
   return formatSuccess(`Emails in ${folder} (${emails.length}):\n\n${lines.join('\n\n')}`, listResult(emails));
@@ -42,15 +61,21 @@ async function handleReadEmail(args) {
   }
 
   const folder = args.folder || 'inbox';
-  const email = await readEmail(args.uid, folder);
+  const local = isLocalMode();
 
-  let body = email.text || '';
+  const email = local
+    ? await localClient.readEmail(args.uid)
+    : await cloudClient.readEmail(args.uid, folder);
+
+  // Mail.app returns the body as `body`; mailparser returns `text`.
+  let body = email.text || email.body || '';
   if (body.length > config.DEFAULTS.EMAIL_BODY_MAX_LENGTH) {
     body = body.substring(0, config.DEFAULTS.EMAIL_BODY_MAX_LENGTH) + '\n... (truncated)';
   }
 
-  const attachmentInfo = email.attachments.length > 0
-    ? `\n\nAttachments (${email.attachments.length}):\n${email.attachments.map(a => `- ${a.filename} (${a.contentType}, ${Math.round(a.size / 1024)}KB)`).join('\n')}`
+  const attachments = email.attachments || [];
+  const attachmentInfo = attachments.length > 0
+    ? `\n\nAttachments (${attachments.length}):\n${attachments.map(a => `- ${a.filename}${a.size ? ` (${Math.round(a.size / 1024)}KB)` : ''}`).join('\n')}`
     : '';
 
   return formatSuccess(
@@ -58,7 +83,7 @@ async function handleReadEmail(args) {
 From: ${email.from}
 To: ${email.to}${email.cc ? `\nCC: ${email.cc}` : ''}
 Date: ${formatDate(email.date)}
-UID: ${email.uid}
+${local ? 'ID' : 'UID'}: ${email.uid || email.id}
 
 ---
 
@@ -80,7 +105,7 @@ async function handleSendEmail(args) {
     return formatError(new Error('Body is required'));
   }
 
-  const result = await sendEmail({
+  const result = await (isLocalMode() ? localClient : smtpClient).sendEmail({
     to: args.to,
     cc: args.cc,
     bcc: args.bcc,
@@ -91,7 +116,7 @@ async function handleSendEmail(args) {
 
   if (result.success) {
     return formatSuccess(
-      `Email sent successfully!\n\nTo: ${args.to}${args.cc ? `\nCC: ${args.cc}` : ''}\nSubject: ${args.subject}\nMessage ID: ${result.messageId}`
+      `Email sent successfully!\n\nTo: ${args.to}${args.cc ? `\nCC: ${args.cc}` : ''}\nSubject: ${args.subject}${result.messageId ? `\nMessage ID: ${result.messageId}` : ''}`
     );
   } else {
     return formatError(new Error('Failed to send email'));
@@ -111,16 +136,20 @@ async function handleSearchEmails(args) {
   if (args.query) criteria.text = args.query;
   if (args.unreadOnly) criteria.unseen = true;
 
-  const emails = await searchEmails(criteria, folder, count);
+  const local = isLocalMode();
+  const raw = local
+    ? await localClient.searchEmails({ query: args.query, from: args.from, subject: args.subject, folder, count })
+    : await cloudClient.searchEmails(criteria, folder, count);
+  const emails = raw.map(e => normalizeEmail(e, local));
 
   if (emails.length === 0) {
     return formatSuccess(`No emails found matching your search criteria in ${folder}.`, listResult([]));
   }
 
   const lines = emails.map((email, i) => {
-    const unread = !email.flags.includes('\\Seen') ? '[UNREAD] ' : '';
+    const unread = email.unread ? '[UNREAD] ' : '';
     const date = formatRelative(new Date(email.date));
-    return `${i + 1}. ${unread}${email.subject}\n   From: ${email.from}\n   Date: ${date}\n   UID: ${email.uid}`;
+    return `${i + 1}. ${unread}${email.subject}\n   From: ${email.from}\n   Date: ${date}\n   ${local ? 'ID' : 'UID'}: ${email.ref}`;
   });
 
   return formatSuccess(`Search results in ${folder} (${emails.length}):\n\n${lines.join('\n\n')}`, listResult(emails));
@@ -137,7 +166,11 @@ async function handleMarkAsRead(args) {
   const folder = args.folder || 'inbox';
   const isRead = args.isRead !== false;
 
-  await markAsRead(args.uid, folder, isRead);
+  if (isLocalMode()) {
+    await localClient.markAsRead(args.uid, isRead);
+  } else {
+    await cloudClient.markAsRead(args.uid, folder, isRead);
+  }
 
   return formatSuccess(`Email ${args.uid} marked as ${isRead ? 'read' : 'unread'}.`);
 }
@@ -146,7 +179,9 @@ async function handleMarkAsRead(args) {
  * Handler: List folders
  */
 async function handleListFolders() {
-  const folders = await listFolders();
+  const folders = isLocalMode()
+    ? await localClient.listFolders()
+    : await cloudClient.listFolders();
 
   const lines = folders.map(f => `- ${f.name}`);
 
@@ -172,7 +207,7 @@ const emailTools = [
     title: 'Read Email',
     description: 'Reads the full content of an email by UID',
     inputSchema: {
-      uid: z.string().describe('The UID of the email to read'),
+      uid: z.string().describe('Email handle: the UID from list-emails in cloud mode, or the message ID in local mode'),
       folder: z.string().optional().describe('Email folder (default: inbox)')
     },
     annotations: {"readOnlyHint":true,"idempotentHint":true,"openWorldHint":true},
@@ -214,7 +249,7 @@ const emailTools = [
     title: 'Mark Email Read/Unread',
     description: 'Marks an email as read or unread',
     inputSchema: {
-      uid: z.string().describe('The UID of the email'),
+      uid: z.string().describe('Email handle: the UID from list-emails in cloud mode, or the message ID in local mode'),
       folder: z.string().optional().describe('Email folder (default: inbox)'),
       isRead: z.boolean().optional().describe('Mark as read (true) or unread (false). Default: true')
     },
