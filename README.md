@@ -191,6 +191,10 @@ The server otherwise looks in `ICLOUD_MCP_IMSG_PATH`, `IMSG_PATH`, both Homebrew
 
 Mail.app tools iterate messages through AppleScript, which is slow on very large mailboxes and can exceed the Apple Event timeout before returning. Narrow the request with `folder` and a smaller `count`, or use cloud mode, where IMAP does the filtering server-side. This is a property of the AppleScript bridge, not something the server can work around.
 
+### Known limitation: large calendar sets
+
+`list-events` in local mode suffers the same AppleScript wall. The date window is already filtered inside Calendar.app with a `whose` query, but on accounts with many calendars, especially subscribed ones carrying years of events (holidays, sports fixtures, travel feeds), the query can still exceed any reasonable timeout. `list-calendars` and the event write tools are not affected. Until the planned EventKit backend lands (see [#10](https://github.com/MrGo2/icloud-mcp/issues/11)), use cloud mode for reading events: CalDAV filters server-side and is fast at any scale.
+
 ### App-specific password (cloud mode)
 
 Cloud mode needs an app-specific password. Your normal Apple ID password will not work, and Apple only issues app-specific passwords on accounts with two-factor authentication turned on.
