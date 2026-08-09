@@ -5,6 +5,7 @@
 
 <div align="center">
 
+[![npm](https://img.shields.io/npm/v/mcp-icloud?style=flat-square&color=cb3837&logo=npm)](https://www.npmjs.com/package/mcp-icloud)
 [![CI](https://github.com/MrGo2/icloud-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/MrGo2/icloud-mcp/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/MrGo2/icloud-mcp?style=flat-square&color=8250df)](https://github.com/MrGo2/icloud-mcp/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
