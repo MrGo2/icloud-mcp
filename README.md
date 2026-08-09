@@ -30,6 +30,8 @@ Credentials are never logged. `ICLOUD_APP_PASSWORD` is read once at startup and 
 
 Every tool argument is validated against a zod schema before the handler runs. Arguments are also coerced at each AppleScript interpolation site, so a value that is not a number cannot reach a script template.
 
+The server collects nothing and keeps nothing: no telemetry, no analytics, no state on disk. The full policy is in [PRIVACY.md](PRIVACY.md).
+
 ## Tools
 
 Tools marked local only return an error in cloud mode, because the iCloud protocols do not expose those services.
