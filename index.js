@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * iCloud MCP Server v2.1.0
+ * iCloud MCP Server v2.1.1
  *
  * Provides Claude with access to Apple services:
  * - Email (via IMAP/SMTP or Mail.app)
@@ -56,7 +56,7 @@ function buildServer() {
   const server = new McpServer(
     {
       name: 'icloud-mcp',
-      version: '2.1.0',
+      version: '2.1.1',
       title: 'iCloud MCP'
     },
     {
@@ -94,7 +94,7 @@ mode returns an error. Use set-mode to switch without restarting.`
   return server;
 }
 
-console.error('[icloud-mcp] Starting iCloud MCP server v2.1.0...');
+console.error('[icloud-mcp] Starting iCloud MCP server v2.1.1...');
 console.error(`[icloud-mcp] Initial mode: ${getMode().toUpperCase()}`);
 console.error(`[icloud-mcp] Tools available: ${TOOLS.length}`);
 

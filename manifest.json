@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "mcp-icloud",
   "display_name": "iCloud MCP",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "description": "Apple services for Claude: Email, Calendar, Contacts, Reminders, Notes, Messages and Safari, in local (AppleScript) or cloud (IMAP/CalDAV/CardDAV) mode.",
   "long_description": "Gives Claude access to seven Apple services through a single MCP server.\n\nLOCAL mode (the default) drives the native macOS apps with AppleScript. It needs no credentials and works offline, but requires macOS and the per-app Automation permissions the system prompts for on first use.\n\nCLOUD mode uses the iCloud protocols (IMAP/SMTP, CalDAV, CardDAV) and works from any machine, but covers only Email, Calendar and Contacts and needs an app-specific password from appleid.apple.com.\n\nSwitch between them at runtime with the set-mode tool; no restart required.",
   "author": {
@@ -31,7 +31,9 @@
     "entry_point": "index.js",
     "mcp_config": {
       "command": "node",
-      "args": ["${__dirname}/index.js"],
+      "args": [
+        "${__dirname}/index.js"
+      ],
       "env": {
         "USE_LOCAL_MODE": "${user_config.use_local_mode}",
         "ICLOUD_EMAIL": "${user_config.icloud_email}",
@@ -62,7 +64,9 @@
     }
   },
   "compatibility": {
-    "platforms": ["darwin"],
+    "platforms": [
+      "darwin"
+    ],
     "runtimes": {
       "node": ">=20"
     }
