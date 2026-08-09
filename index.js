@@ -61,6 +61,10 @@ function buildServer() {
     },
     {
       capabilities: { tools: { listChanged: true } },
+      // The 41-tool list is identical in both modes (mode changes behaviour,
+      // not the roster), so clients may cache it. Without this the SDK
+      // advertises ttlMs: 0 and every 2026-era client re-fetches constantly.
+      cacheHints: { 'tools/list': { ttlMs: 3600000, cacheScope: 'public' } },
       instructions: `Access to Apple services in two modes.
 
 LOCAL (default, macOS only) drives the native apps via AppleScript.
