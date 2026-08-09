@@ -4,6 +4,9 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+overrides:
+  semver@<5.7.2: ^5.7.2
+
 importers:
 
   .:
@@ -176,8 +179,8 @@ packages:
   selderee@0.12.0:
     resolution: {integrity: sha512-b1YMh3+DHZp59DLna3qVwQ5iOla/nrI6mLBNW02XxU77M3046Df6VLkoaJyFz20VsGIG5kkp+FK0kg4K4HnUFw==}
 
-  semver@5.3.0:
-    resolution: {integrity: sha512-mfmm3/H9+67MCVix1h+IXTpDwL6710LyHuk7+cWC9T1mE0qz4iHhh6r4hU2wrIT9iTsAAC2XQRvfblL028cpLw==}
+  semver@5.7.2:
+    resolution: {integrity: sha512-cBznnQ9KjJqU67B52RMC65CMarK2600WFnbkcaiwWq3xy/5haFJlshgnpjovMVJ+Hff49d8GEn0b87C5pDQ10g==}
     hasBin: true
 
   string_decoder@0.10.31:
@@ -353,7 +356,7 @@ snapshots:
     dependencies:
       parseley: 0.13.1
 
-  semver@5.3.0: {}
+  semver@5.7.2: {}
 
   string_decoder@0.10.31: {}
 
@@ -370,7 +373,7 @@ snapshots:
 
   utf7@1.0.2:
     dependencies:
-      semver: 5.3.0
+      semver: 5.7.2
 
   xml-js@1.6.11:
     dependencies:
