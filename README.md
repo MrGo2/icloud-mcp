@@ -15,6 +15,8 @@
 
 </div>
 
+<img src="assets/demo.gif" alt="Claude creating a note, a reminder and a calendar event through icloud-mcp" width="100%">
+
 icloud-mcp covers seven Apple services with two interchangeable backends, and as far as we know it is the only MCP server that does. In local mode it drives the native macOS apps through AppleScript: no credentials, no network, and it reaches the services the iCloud protocols do not expose (Reminders, Notes, Messages, Safari). In cloud mode it speaks IMAP/SMTP, CalDAV and CardDAV instead, so it runs on any machine, not just a Mac. The `set-mode` tool switches between the two at runtime, without a restart.
 
 [![Install with NPX in VS Code](https://img.shields.io/badge/VS_Code-NPM-0098FF?style=flat-square&logo=visualstudiocode&logoColor=white)](https://insiders.vscode.dev/redirect/mcp/install?name=icloud&config=%7B%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22mcp-icloud%22%5D%7D)
