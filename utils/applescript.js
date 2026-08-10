@@ -161,18 +161,24 @@ function asBool(value, fallback = false) {
  * @param {Date|string} date - Date to format
  * @returns {string} - AppleScript date string
  */
-function formatAppleScriptDate(date) {
+/**
+ * AppleScript statements that build a Date into `varName`.
+ * `date "August 15, 2026 6:00 PM"` literals only parse when the string matches
+ * the system locale, so the date is assembled numerically instead. Day is set
+ * to 1 first so applying the components one by one cannot overflow a month.
+ */
+function appleScriptDateStmts(varName, date) {
   const d = date instanceof Date ? date : new Date(date);
-  // Format: "January 15, 2026 at 10:30:00 AM"
-  return d.toLocaleString('en-US', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: true
-  }).replace(',', ' at');
+  if (isNaN(d.getTime())) throw new Error(`Invalid date: ${date}`);
+  const secs = d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds();
+  return [
+    `set ${varName} to (current date)`,
+    `set day of ${varName} to 1`,
+    `set year of ${varName} to ${d.getFullYear()}`,
+    `set month of ${varName} to ${d.getMonth() + 1}`,
+    `set day of ${varName} to ${d.getDate()}`,
+    `set time of ${varName} to ${secs}`
+  ].join('\n      ');
 }
 
 /**
@@ -209,6 +215,6 @@ module.exports = {
   escapeJXA,
   asInt,
   asBool,
-  formatAppleScriptDate,
+  appleScriptDateStmts,
   AppleScriptError
 };

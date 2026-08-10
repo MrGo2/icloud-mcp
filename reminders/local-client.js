@@ -3,7 +3,7 @@
  * Accesses Reminders.app via AppleScript
  */
 
-const { runAppleScript, runJXA, escapeAppleScript, escapeJXA, asInt, asBool, formatAppleScriptDate } = require('../utils/applescript');
+const { runAppleScript, runJXA, escapeAppleScript, escapeJXA, asInt, asBool, appleScriptDateStmts } = require('../utils/applescript');
 
 /**
  * List all reminder lists
@@ -109,7 +109,8 @@ async function createReminder({ name, body, dueDate, listName = 'Reminders', pri
 
   if (dueDate) {
     script += `
-        set due date of newReminder to date "${formatAppleScriptDate(new Date(dueDate))}"
+        ${appleScriptDateStmts('theDue', new Date(dueDate))}
+        set due date of newReminder to theDue
     `;
   }
 
@@ -135,11 +136,16 @@ async function updateReminder(reminderId, { name, body, dueDate, priority }) {
   if (name) updateCommands.push(`set name of theReminder to "${escapeAppleScript(name)}"`);
   if (body !== undefined) updateCommands.push(`set body of theReminder to "${escapeAppleScript(body || '')}"`);
   if (priority !== undefined) updateCommands.push(`set priority of theReminder to ${asInt(priority, 0)}`);
-  if (dueDate) updateCommands.push(`set due date of theReminder to date "${formatAppleScriptDate(new Date(dueDate))}"`);
+  let dateSetup = [];
+  if (dueDate) {
+    dateSetup.push(appleScriptDateStmts('theDue', new Date(dueDate)));
+    updateCommands.push('set due date of theReminder to theDue');
+  }
   if (dueDate === null) updateCommands.push(`set due date of theReminder to missing value`);
 
   const script = `
     tell application "Reminders"
+      ${dateSetup.join('\n      ')}
       set allLists to lists
       repeat with theList in allLists
         try

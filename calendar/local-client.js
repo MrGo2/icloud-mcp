@@ -3,7 +3,7 @@
  * Accesses Calendar.app via AppleScript
  */
 
-const { runAppleScript, runJXA, escapeAppleScript, escapeJXA, asInt, formatAppleScriptDate } = require('../utils/applescript');
+const { runAppleScript, runJXA, escapeAppleScript, escapeJXA, asInt, appleScriptDateStmts } = require('../utils/applescript');
 const config = require('../config');
 
 /**
@@ -115,12 +115,12 @@ async function createEvent({ summary, start, end, location, description, calenda
   // Use default calendar if none specified
   const targetCalendar = calendarName || 'Calendar';
 
-  if (allDay) {
-    // All-day event
-    const script = `
+  const script = `
       tell application "Calendar"
+        ${appleScriptDateStmts('newStart', startDate)}
+        ${appleScriptDateStmts('newEnd', endDate)}
         tell calendar "${escapeAppleScript(targetCalendar)}"
-          set newEvent to make new event with properties {summary:"${escapeAppleScript(summary)}", start date:date "${formatAppleScriptDate(startDate)}", end date:date "${formatAppleScriptDate(endDate)}", allday event:true}
+          set newEvent to make new event with properties {summary:"${escapeAppleScript(summary)}", start date:newStart, end date:newEnd${allDay ? ', allday event:true' : ''}}
           ${location ? `set location of newEvent to "${escapeAppleScript(location)}"` : ''}
           ${description ? `set description of newEvent to "${escapeAppleScript(description)}"` : ''}
           return uid of newEvent
@@ -128,23 +128,8 @@ async function createEvent({ summary, start, end, location, description, calenda
       end tell
     `;
 
-    const uid = await runAppleScript(script);
-    return { success: true, id: uid, message: 'Event created successfully' };
-  } else {
-    const script = `
-      tell application "Calendar"
-        tell calendar "${escapeAppleScript(targetCalendar)}"
-          set newEvent to make new event with properties {summary:"${escapeAppleScript(summary)}", start date:date "${formatAppleScriptDate(startDate)}", end date:date "${formatAppleScriptDate(endDate)}"}
-          ${location ? `set location of newEvent to "${escapeAppleScript(location)}"` : ''}
-          ${description ? `set description of newEvent to "${escapeAppleScript(description)}"` : ''}
-          return uid of newEvent
-        end tell
-      end tell
-    `;
-
-    const uid = await runAppleScript(script);
-    return { success: true, id: uid, message: 'Event created successfully' };
-  }
+  const uid = await runAppleScript(script);
+  return { success: true, id: uid, message: 'Event created successfully' };
 }
 
 /**
@@ -155,10 +140,17 @@ async function createEvent({ summary, start, end, location, description, calenda
  */
 async function updateEvent(eventId, { summary, start, end, location, description }) {
   let updateCommands = [];
+  let dateSetup = [];
 
   if (summary) updateCommands.push(`set summary of theEvent to "${escapeAppleScript(summary)}"`);
-  if (start) updateCommands.push(`set start date of theEvent to date "${formatAppleScriptDate(new Date(start))}"`);
-  if (end) updateCommands.push(`set end date of theEvent to date "${formatAppleScriptDate(new Date(end))}"`);
+  if (start) {
+    dateSetup.push(appleScriptDateStmts('newStart', new Date(start)));
+    updateCommands.push('set start date of theEvent to newStart');
+  }
+  if (end) {
+    dateSetup.push(appleScriptDateStmts('newEnd', new Date(end)));
+    updateCommands.push('set end date of theEvent to newEnd');
+  }
   if (location !== undefined) updateCommands.push(`set location of theEvent to "${escapeAppleScript(location || '')}"`);
   if (description !== undefined) updateCommands.push(`set description of theEvent to "${escapeAppleScript(description || '')}"`);
 
@@ -168,6 +160,7 @@ async function updateEvent(eventId, { summary, start, end, location, description
 
   const script = `
     tell application "Calendar"
+      ${dateSetup.join('\n      ')}
       set allCalendars to calendars
       repeat with cal in allCalendars
         try
