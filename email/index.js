@@ -216,7 +216,7 @@ const emailTools = [
   {
     name: 'send-email',
     title: 'Send Email',
-    description: 'Composes and sends an email',
+    description: 'Sends an email immediately from the user\'s account to one or more comma-separated recipients, with optional CC, BCC and HTML body. Cloud mode delivers over SMTP and returns the new message ID; local mode sends through Mail.app, which only sends plain text and returns no ID. There is no draft step, so the message goes out as soon as the tool runs.',
     inputSchema: {
       to: z.string().describe('Recipient email address(es), comma-separated'),
       cc: z.string().optional().describe('CC recipient(s), comma-separated'),
@@ -232,7 +232,7 @@ const emailTools = [
     name: 'search-emails',
     outputSchema: listOutput('Matching emails'),
     title: 'Search Emails',
-    description: 'Search for emails by criteria',
+    description: 'Searches one mail folder (inbox by default) by free text, sender, subject and unread state; the filters combine as AND. Results carry the same summary fields as list-emails, including the ref handle that read-email and mark-as-read take.',
     inputSchema: {
       query: z.string().optional().describe('Text to search in email content'),
       from: z.string().optional().describe('Filter by sender'),

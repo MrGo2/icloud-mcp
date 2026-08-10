@@ -182,7 +182,7 @@ const calendarTools = [
     name: 'list-events',
     outputSchema: listOutput('Calendar events'),
     title: 'List Events',
-    description: 'Lists upcoming calendar events',
+    description: 'Lists upcoming calendar events within a look-ahead window (30 days by default, up to 365). Each event carries its title, start and end times, and the ref handle that update-event and delete-event take as their eventUrl argument.',
     inputSchema: {
       count: z.number().int().min(1).max(50).optional().describe('Number of events to retrieve (default: 25, max: 50)'),
       daysAhead: z.number().int().min(1).max(365).optional().describe('Number of days to look ahead (default: 30)')

@@ -260,7 +260,7 @@ const contactsTools = [
     name: 'list-contacts',
     outputSchema: listOutput('Contacts'),
     title: 'List Contacts',
-    description: 'Lists contacts from your iCloud address book',
+    description: 'Lists contacts from the user\'s address book, up to 50 per call, including the handle that read-contact and delete-contact take. For a targeted lookup, search-contacts filters by name, email or phone instead of paging through the full list.',
     inputSchema: {
       count: z.number().int().min(1).max(50).optional().describe('Number of contacts to retrieve (default: 25, max: 50)')
     },
@@ -292,7 +292,7 @@ const contactsTools = [
   {
     name: 'create-contact',
     title: 'Create Contact',
-    description: 'Creates a new contact',
+    description: 'Creates a contact in the user\'s address book (Contacts.app in local mode, iCloud over CardDAV in cloud mode). Every field is optional, so pass at least a name (displayName, or firstName and lastName) along with any known email, phone, organization, job title or notes.',
     inputSchema: {
       displayName: z.string().optional().describe('Full display name'),
       firstName: z.string().optional().describe('First name'),
@@ -309,7 +309,7 @@ const contactsTools = [
   {
     name: 'delete-contact',
     title: 'Delete Contact',
-    description: 'Deletes a contact',
+    description: 'Permanently deletes a contact from the user\'s address book. Takes the handle returned by list-contacts or search-contacts; confirm the target with read-contact first, because there is no undo through this server.',
     inputSchema: {
       contactUrl: z.string().describe('URL or ID of the contact to delete (from list-contacts output)')
     },
