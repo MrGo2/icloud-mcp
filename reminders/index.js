@@ -115,7 +115,7 @@ const remindersTools = [
       dueDate: z.string().optional().describe('New due date in ISO format'),
       priority: z.number().int().min(0).max(9).optional().describe('New priority level')
     },
-    annotations: {"readOnlyHint":false,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false},
+    annotations: {"readOnlyHint":false,"destructiveHint":true,"idempotentHint":true,"openWorldHint":false},
     handler: async ({ reminderId, ...updates }) => {
       const modeError = requireLocalMode('update-reminder');
       if (modeError) return modeError;

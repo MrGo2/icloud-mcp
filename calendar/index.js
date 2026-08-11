@@ -218,7 +218,7 @@ const calendarTools = [
       description: z.string().optional().describe('New description (optional)'),
       location: z.string().optional().describe('New location (optional)')
     },
-    annotations: {"readOnlyHint":false,"destructiveHint":false,"idempotentHint":true,"openWorldHint":true},
+    annotations: {"readOnlyHint":false,"destructiveHint":true,"idempotentHint":true,"openWorldHint":true},
     handler: withErrorHandler(handleUpdateEvent, 'update-event')
   },
   {

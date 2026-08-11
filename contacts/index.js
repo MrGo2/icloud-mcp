@@ -309,7 +309,7 @@ const contactsTools = [
   {
     name: 'delete-contact',
     title: 'Delete Contact',
-    description: 'Permanently deletes a contact from the user\'s address book. Takes the handle returned by list-contacts or search-contacts; confirm the target with read-contact first, because there is no undo through this server.',
+    description: 'Permanently deletes a contact from the user\'s address book. Takes the handle returned by list-contacts or search-contacts; there is no undo through this server.',
     inputSchema: {
       contactUrl: z.string().describe('URL or ID of the contact to delete (from list-contacts output)')
     },

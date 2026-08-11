@@ -225,7 +225,7 @@ const emailTools = [
       body: z.string().describe('Email body content'),
       isHtml: z.boolean().optional().describe('Whether the body is HTML (default: false)')
     },
-    annotations: {"readOnlyHint":false,"destructiveHint":false,"idempotentHint":false,"openWorldHint":true},
+    annotations: {"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false,"openWorldHint":true},
     handler: withErrorHandler(handleSendEmail, 'send-email')
   },
   {

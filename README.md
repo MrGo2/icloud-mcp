@@ -34,7 +34,9 @@ Credentials are never logged. `ICLOUD_APP_PASSWORD` is read once at startup and 
 
 Every tool argument is validated against a zod schema before the handler runs. Arguments are also coerced at each AppleScript interpolation site, so a value that is not a number cannot reach a script template.
 
-The server collects nothing and keeps nothing: no telemetry, no analytics, no state on disk. The full policy is in [PRIVACY.md](PRIVACY.md).
+## Privacy Policy
+
+The server collects nothing and keeps nothing: no telemetry, no analytics, no state on disk. Your data moves only between your machine, the AI client you connect and Apple's services. The full policy, covering collection, storage, third-party sharing, retention and contact, is in [PRIVACY.md](PRIVACY.md).
 
 ## Tools
 
@@ -115,7 +117,7 @@ Reading requires the [`imsg`](https://github.com/steipete/imsg) CLI and Full Dis
 
 ### Tool annotations (MCP hints)
 
-Every tool declares its behaviour explicitly instead of relying on the spec defaults, which are deliberately pessimistic. All `list-*`, `read-*`, `search-*` and `get-*` tools, plus `about` and `check-auth-status`, are marked read-only. The four destructive tools (`delete-event`, `delete-contact`, `delete-reminder`, `close-safari-tab`) carry `destructiveHint`. Tools that reach the network or another person carry `openWorldHint`: all Email and Calendar tools, `send-message`, `react-message` and `open-safari-url`. The read-only tools plus `mark-as-read`, `complete-reminder`, `update-reminder`, `update-event` and `set-mode` are marked idempotent.
+Every tool declares its behaviour explicitly instead of relying on the spec defaults, which are deliberately pessimistic. All `list-*`, `read-*`, `search-*` and `get-*` tools, plus `about` and `check-auth-status`, are marked read-only. Nine tools carry `destructiveHint`: the four deletions (`delete-event`, `delete-contact`, `delete-reminder`, `close-safari-tab`), the three that reach another person irrevocably (`send-email`, `send-message`, `react-message`) and the two in-place updates (`update-event`, `update-reminder`). Tools that reach the network or another person carry `openWorldHint`: all Email and Calendar tools, `send-message`, `react-message` and `open-safari-url`. The read-only tools plus `mark-as-read`, `complete-reminder`, `update-reminder`, `update-event` and `set-mode` are marked idempotent.
 
 ## Installation
 

@@ -110,13 +110,13 @@ const messagesTools = [
   {
     name: 'send-message',
     title: 'Send Message',
-    description: 'Send an iMessage or SMS. IMPORTANT: Always confirm with user before sending.',
+    description: 'Sends an iMessage or SMS to a phone number or email handle, with an optional file attachment. The message is delivered as soon as the tool runs; there is no draft step and no recall.',
     inputSchema: {
       to: z.string().describe('Recipient phone number (with country code) or email'),
       body: z.string().describe('Message content'),
       file: z.string().optional().describe('Path to file attachment (optional)')
     },
-    annotations: {"readOnlyHint":false,"destructiveHint":false,"idempotentHint":false,"openWorldHint":true},
+    annotations: {"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false,"openWorldHint":true},
     handler: withErrorHandler(async ({ to, body, file }) => {
       const modeError = requireLocalMode('send-message');
       if (modeError) return modeError;
@@ -144,7 +144,7 @@ const messagesTools = [
       chatId: z.number().int().describe('Chat ID'),
       type: z.enum(['love', 'like', 'dislike', 'laugh', 'emphasis', 'question']).describe('Reaction type')
     },
-    annotations: {"readOnlyHint":false,"destructiveHint":false,"idempotentHint":false,"openWorldHint":true},
+    annotations: {"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false,"openWorldHint":true},
     handler: withErrorHandler(async ({ chatId, type }) => {
       const modeError = requireLocalMode('react-message');
       if (modeError) return modeError;
