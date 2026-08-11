@@ -20,6 +20,7 @@
 icloud-mcp covers seven Apple services with two interchangeable backends, and as far as we know it is the only MCP server that does. In local mode it drives the native macOS apps through AppleScript: no credentials, no network, and it reaches the services the iCloud protocols do not expose (Reminders, Notes, Messages, Safari). In cloud mode it speaks IMAP/SMTP, CalDAV and CardDAV instead, so it runs on any machine, not just a Mac. The `set-mode` tool switches between the two at runtime, without a restart.
 
 [![Install with NPX in VS Code](https://img.shields.io/badge/VS_Code-NPM-0098FF?style=flat-square&logo=visualstudiocode&logoColor=white)](https://insiders.vscode.dev/redirect/mcp/install?name=icloud&config=%7B%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22mcp-icloud%22%5D%7D)
+[![Install in Cursor](https://img.shields.io/badge/Cursor-Install-000000?style=flat-square&logo=cursor&logoColor=white)](https://cursor.com/en/install-mcp?name=icloud&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIm1jcC1pY2xvdWQiXX0=)
 
 ## Features
 
@@ -119,6 +120,20 @@ Every tool declares its behaviour explicitly instead of relying on the spec defa
 ## Installation
 
 Requires Node.js 20 or newer.
+
+### Let your AI install it
+
+Paste this into Claude, Claude Code, Cursor, ChatGPT or any agent with shell or config access:
+
+```
+Install the iCloud MCP server. It is the npm package "mcp-icloud" (Node 20+),
+stdio transport, server name "icloud", command "npx" with args ["-y", "mcp-icloud"].
+On Claude Code run: claude mcp add --transport stdio icloud -- npx -y mcp-icloud
+For other clients, add that command/args pair to the client's MCP config file.
+Local mode (default) needs macOS; cloud mode needs env vars USE_LOCAL_MODE=false,
+ICLOUD_EMAIL and ICLOUD_APP_PASSWORD (app-specific password from account.apple.com).
+Docs: https://github.com/MrGo2/icloud-mcp
+```
 
 ### Claude Desktop
 
