@@ -1,7 +1,7 @@
 {
   "name": "mcp-icloud",
   "mcpName": "io.github.MrGo2/icloud-mcp",
-  "version": "2.1.2",
+  "version": "2.1.3",
   "description": "MCP server for Apple services - Email, Calendar, Contacts, Reminders, Notes, Messages and Safari - with dual local (AppleScript) and cloud (IMAP/CalDAV/CardDAV) modes",
   "main": "index.js",
   "bin": {
