@@ -1,0 +1,105 @@
+name: Release
+
+# Tag push v* → test → npm publish (OIDC trusted publishing, provenance
+# automatic) → MCP Registry publish (github-oidc) → mcpb pack → GitHub release
+# with the .mcpb attached. No npm token anywhere: npmjs.com trusts this exact
+# repo + workflow filename via OIDC.
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  test:
+    # macOS: mode.js hard-blocks LOCAL mode elsewhere and the suites exercise
+    # mode switching (same reason as ci.yml).
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Test
+        run: pnpm test
+
+  release:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # OIDC for npm trusted publishing and mcp-publisher
+      contents: write   # create the GitHub release
+    steps:
+      - uses: actions/checkout@v4
+
+      # Node 24 bundles npm >= 11.5.1, the minimum for OIDC trusted publishing.
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Verify tag matches versions
+        run: |
+          TAG_VERSION=${GITHUB_REF#refs/tags/v}
+          for f in package.json manifest.json; do
+            V=$(jq -r .version "$f")
+            [ "$V" = "$TAG_VERSION" ] || { echo "$f says $V, tag says $TAG_VERSION"; exit 1; }
+          done
+          for q in .version '.packages[0].version'; do
+            V=$(jq -r "$q" server.json)
+            [ "$V" = "$TAG_VERSION" ] || { echo "server.json $q says $V, tag says $TAG_VERSION"; exit 1; }
+          done
+
+      # Skip if the version is already on npm, so a failed later step can be
+      # re-run without dying on EPUBLISHCONFLICT.
+      - name: Publish to npm
+        run: |
+          TAG_VERSION=${GITHUB_REF#refs/tags/v}
+          if npm view "mcp-icloud@$TAG_VERSION" version >/dev/null 2>&1; then
+            echo "mcp-icloud@$TAG_VERSION already on npm, skipping publish"
+          else
+            npm publish
+          fi
+
+      # npm's post-publish scan can keep the new version 404 for a few
+      # minutes; the registry validates against npm, so wait until visible.
+      - name: Wait for npm visibility
+        run: |
+          TAG_VERSION=${GITHUB_REF#refs/tags/v}
+          for i in $(seq 1 60); do
+            npm view "mcp-icloud@$TAG_VERSION" version >/dev/null 2>&1 && exit 0
+            sleep 10
+          done
+          echo "mcp-icloud@$TAG_VERSION not visible on npm after 10 minutes"
+          exit 1
+
+      - name: Install mcp-publisher
+        run: |
+          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+
+      - name: Publish to MCP Registry
+        run: |
+          ./mcp-publisher login github-oidc
+          ./mcp-publisher publish
+
+      - name: Build .mcpb bundle
+        run: |
+          npm install --omit=dev --ignore-scripts
+          npm install -g @anthropic-ai/mcpb
+          mcpb pack
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF#refs/tags/}" icloud-mcp.mcpb \
+            --title "${GITHUB_REF#refs/tags/}" --generate-notes
