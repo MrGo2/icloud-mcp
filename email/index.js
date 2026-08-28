@@ -116,7 +116,7 @@ async function handleSendEmail(args) {
 
   if (result.success) {
     return formatSuccess(
-      `Email sent successfully!\n\nTo: ${args.to}${args.cc ? `\nCC: ${args.cc}` : ''}\nSubject: ${args.subject}${result.messageId ? `\nMessage ID: ${result.messageId}` : ''}`
+      `Email sent successfully!\n\n${result.from ? `From: ${result.from}\n` : ''}To: ${args.to}${args.cc ? `\nCC: ${args.cc}` : ''}\nSubject: ${args.subject}${result.messageId ? `\nMessage ID: ${result.messageId}` : ''}${result.savedToSent === false ? `\nWARNING: not saved to Sent${result.saveToSentError ? ` (${result.saveToSentError})` : ''}` : result.savedToSent ? '\nSaved to Sent' : ''}`
     );
   } else {
     return formatError(new Error('Failed to send email'));
