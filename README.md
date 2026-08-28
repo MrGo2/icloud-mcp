@@ -255,9 +255,16 @@ Call `about` for the active mode and service list, and `check-auth-status` to co
 | `USE_LOCAL_MODE` | `true` | `false` selects cloud mode |
 | `ICLOUD_EMAIL` | (unset) | iCloud address, cloud mode only |
 | `ICLOUD_APP_PASSWORD` | (unset) | App-specific password, cloud mode only |
+| `ICLOUD_FROM_ADDRESS` | (unset) | Cloud mode: send as this address instead of the Apple ID. Must be verified on that Apple ID (an iCloud alias, or an iCloud+ Custom Email Domain address), or iCloud rejects the message |
+| `ICLOUD_FROM_NAME` | (unset) | Cloud mode: display name shown next to the From address |
+| `ICLOUD_SAVE_TO_SENT` | `true` | Cloud mode: file a copy of each sent message in the Sent folder. `false` sends without keeping one |
 | `ICLOUD_MCP_IMSG_PATH` | (unset) | Explicit path to the `imsg` binary |
 
 Read from the environment, or from a `.env` file beside the module. See `.env.example`.
+
+The From address is account-level configuration rather than a `send-email` parameter: the sending identity belongs to the account, and the model is not given a free-form From to set. Authentication always uses `ICLOUD_EMAIL`.
+
+The Sent copy is built from the same Message-ID and Date as the message that was sent. When a message has Bcc recipients, the Sent copy also keeps the `Bcc:` header so you can see who was blind-copied; the message the recipients receive never carries it. Filing in Sent is best-effort: if the APPEND fails, the send is still reported as successful and the tool output carries a warning.
 
 ## Development
 

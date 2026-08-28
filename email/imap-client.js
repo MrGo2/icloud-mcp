@@ -63,6 +63,20 @@ function getFolderName(folder) {
 }
 
 /**
+ * Append a raw MIME message to a folder (used to save a Sent copy)
+ */
+function appendToFolder(message, folder = 'sent', flags = ['\\Seen']) {
+  const folderName = getFolderName(folder);
+
+  return withImap((imap) => new Promise((resolve, reject) => {
+    imap.append(message, { mailbox: folderName, flags, date: new Date() }, (err) => {
+      if (err) reject(err);
+      else resolve(true);
+    });
+  }));
+}
+
+/**
  * List emails from a folder
  */
 async function listEmails(folder = 'inbox', count = 25) {
@@ -347,5 +361,6 @@ module.exports = {
   searchEmails,
   markAsRead,
   listFolders,
-  getFolderName
+  getFolderName,
+  appendToFolder
 };
