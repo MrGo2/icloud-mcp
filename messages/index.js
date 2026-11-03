@@ -9,7 +9,7 @@ const localClient = require('./local-client');
 const { formatError, formatSuccess, withErrorHandler } = require('../utils/error-handler');
 const { listOutput, listResult } = require('../utils/schemas');
 const { isLocalMode } = require('../mode');
-const { execFileSync } = require('child_process');
+const { execFile } = require('child_process');
 const fs = require('fs');
 
 // Homebrew's prefix differs between Apple Silicon and Intel, and an MCP server
@@ -29,6 +29,9 @@ function resolveImsg() {
   return 'imsg';
 }
 
+// Chats scanned when `since` is set; listing 5,000 takes well under a second.
+const SINCE_FETCH_LIMIT = 5000;
+
 function requireLocalMode(toolName) {
   if (!isLocalMode()) {
     return formatError(new Error(`${toolName} is only available in LOCAL mode. Use set-mode to switch.`));
@@ -36,14 +39,29 @@ function requireLocalMode(toolName) {
   return null;
 }
 
-function runImsg(args) {
+// Async on purpose: a synchronous call blocks the whole server, so parallel
+// reads from a client queue behind each other until they time out (#17).
+function execImsg(args) {
+  return new Promise((resolve, reject) => {
+    execFile(resolveImsg(), args, {
+      timeout: 30000,
+      encoding: 'utf-8',
+      maxBuffer: 64 * 1024 * 1024
+    }, (error, stdout, stderr) => {
+      if (error) {
+        error.stderr = stderr;
+        reject(error);
+      } else {
+        resolve(stdout);
+      }
+    });
+  });
+}
+
+async function runImsg(args) {
   let output;
   try {
-    output = execFileSync(resolveImsg(), args, {
-      timeout: 15000,
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe']
-    });
+    output = await execImsg(args);
   } catch (error) {
     const detail = (error.stderr || error.message || '').toString();
     if (detail.includes('permissionDenied')) {
@@ -51,6 +69,9 @@ function runImsg(args) {
     }
     if (error.code === 'ENOENT') {
       throw new Error('The imsg CLI was not found. Install it (brew install imsg) or set ICLOUD_MCP_IMSG_PATH.');
+    }
+    if (error.killed) {
+      throw new Error('imsg timed out after 30s');
     }
     throw new Error(detail.trim() || 'imsg failed');
   }
@@ -70,17 +91,26 @@ const messagesTools = [
     name: 'list-chats',
     outputSchema: listOutput('Recent conversations'),
     title: 'List Chats',
-    description: 'List recent iMessage/SMS conversations with contact names and last message preview',
+    description: 'List recent iMessage/SMS conversations, most recent first. Use `since` to get only the conversations active after a date (e.g. the last 7 days).',
     inputSchema: {
-      limit: z.number().int().min(1).max(200).optional().describe('Number of conversations to show (default 20)')
+      limit: z.number().int().min(1).max(1000).optional().describe('Maximum number of conversations to return (default 20)'),
+      since: z.string().refine(v => !Number.isNaN(Date.parse(v)), 'since must be an ISO 8601 date')
+        .optional().describe('Only conversations with a message at or after this date (ISO 8601, optional)')
     },
     annotations: {"readOnlyHint":true,"idempotentHint":true,"openWorldHint":false},
-    handler: withErrorHandler(async ({ limit = 20 }) => {
+    handler: withErrorHandler(async ({ limit = 20, since }) => {
       const modeError = requireLocalMode('list-chats');
       if (modeError) return modeError;
-      const result = runImsg(['chats', '--limit', String(limit), '--json']);
+      // imsg has no date filter, but returns chats newest first, so fetch a
+      // wide window and cut it at `since` here.
+      const fetchLimit = since ? Math.max(limit, SINCE_FETCH_LIMIT) : limit;
+      const result = await runImsg(['chats', '--limit', String(fetchLimit), '--json']);
       // imsg emits JSONL, and runImsg unwraps a single line to a bare object.
-      const chats = Array.isArray(result) ? result : (result ? [result] : []);
+      let chats = Array.isArray(result) ? result : (result ? [result] : []);
+      if (since) {
+        const cutoff = Date.parse(since);
+        chats = chats.filter(c => Date.parse(c.last_message_at) >= cutoff).slice(0, limit);
+      }
       return formatSuccess(JSON.stringify(chats, null, 2), listResult(chats));
     }, 'list-chats')
   },
@@ -103,7 +133,7 @@ const messagesTools = [
       if (start) args.push('--start', start);
       if (end) args.push('--end', end);
       if (attachments) args.push('--attachments');
-      const result = runImsg(args);
+      const result = await runImsg(args);
       return formatSuccess(JSON.stringify(result, null, 2));
     }, 'read-messages')
   },
@@ -128,7 +158,7 @@ const messagesTools = [
         try {
           const args = ['send', '--to', to, '--text', body];
           if (file) args.push('--file', file);
-          const result = runImsg(args);
+          const result = await runImsg(args);
           return formatSuccess(JSON.stringify(result, null, 2));
         } catch (e) {
           throw new Error(`${error.message} (imsg fallback also failed: ${e.message})`);
@@ -148,7 +178,7 @@ const messagesTools = [
     handler: withErrorHandler(async ({ chatId, type }) => {
       const modeError = requireLocalMode('react-message');
       if (modeError) return modeError;
-      const result = runImsg(['react', '--chat-id', String(chatId), '--type', type]);
+      const result = await runImsg(['react', '--chat-id', String(chatId), '--type', type]);
       return formatSuccess(JSON.stringify(result, null, 2));
     }, 'react-message')
   }

@@ -103,7 +103,7 @@ Tools marked local only return an error in cloud mode, because the iCloud protoc
 
 Reading requires the [`imsg`](https://github.com/steipete/imsg) CLI and Full Disk Access.
 
-- **list-chats**: `limit` (number, optional)
+- **list-chats**: `limit` (number, optional, max 1000), `since` (ISO 8601, optional — only chats active since that date, e.g. a weekly review)
 - **read-messages**: `chatId` (number); `limit` (number, optional); `start`, `end` (ISO 8601, optional); `attachments` (boolean, optional)
 - **send-message**: `to` (string), `body` (string), `file` (string, optional)
 - **react-message**: `chatId` (number), `type` (`love`, `like`, `dislike`, `laugh`, `emphasis`, `question`)
