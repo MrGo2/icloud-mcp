@@ -1,9 +1,9 @@
 name: Release
 
-# Tag push v* → test → npm publish (OIDC trusted publishing, provenance
-# automatic) → MCP Registry publish (github-oidc) → mcpb pack → GitHub release
-# with the .mcpb attached. No npm token anywhere: npmjs.com trusts this exact
-# repo + workflow filename via OIDC.
+# Tag push v* → test → npm STAGE publish (OIDC trusted publishing, provenance)
+# → human approves on npmjs.com with 2FA → MCP Registry publish (github-oidc)
+# → mcpb pack → GitHub release with the .mcpb attached. No npm token anywhere:
+# npmjs.com trusts this exact repo + workflow filename via OIDC.
 
 on:
   push:
@@ -59,28 +59,49 @@ jobs:
             [ "$V" = "$TAG_VERSION" ] || { echo "server.json $q says $V, tag says $TAG_VERSION"; exit 1; }
           done
 
+      # package.json declares contentPolicy.class "dual-use", and npm refuses
+      # direct OIDC publishing of dual-use packages (403). So CI only STAGES
+      # the version; a maintainer approves it with 2FA on npmjs.com
+      # (Staged Packages tab) or `npm stage approve <id>`. Needs npm >= 11.15.
+      - name: Upgrade npm (stage publish)
+        run: npm install -g npm@11.21.1 && npm --version
+
       # Skip if the version is already on npm, so a failed later step can be
       # re-run without dying on EPUBLISHCONFLICT.
-      - name: Publish to npm
+      - name: Stage on npm
         run: |
           TAG_VERSION=${GITHUB_REF#refs/tags/v}
           if npm view "mcp-icloud@$TAG_VERSION" version >/dev/null 2>&1; then
-            echo "mcp-icloud@$TAG_VERSION already on npm, skipping publish"
+            echo "mcp-icloud@$TAG_VERSION already on npm, skipping stage"
           else
-            npm publish
+            npm stage publish --provenance
+            echo "::notice::mcp-icloud@$TAG_VERSION staged. Approve it on npmjs.com > mcp-icloud > Staged Packages (2FA)."
           fi
 
-      # npm's post-publish scan can keep the new version 404 for a few
-      # minutes; the registry validates against npm, so wait until visible.
-      - name: Wait for npm visibility
+  publish:
+    needs: release
+    runs-on: ubuntu-latest
+    # Polls until the staged version is approved. If approval comes after the
+    # timeout, re-run this job alone: `gh run rerun <run-id> --failed`.
+    timeout-minutes: 350
+    permissions:
+      id-token: write   # OIDC for mcp-publisher
+      contents: write   # create the GitHub release
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      # Waits for the human approval of the staged version, then for npm's
+      # post-publish scan; the MCP Registry validates against npm.
+      - name: Wait for npm approval and visibility
         run: |
           TAG_VERSION=${GITHUB_REF#refs/tags/v}
-          for i in $(seq 1 60); do
-            npm view "mcp-icloud@$TAG_VERSION" version >/dev/null 2>&1 && exit 0
-            sleep 10
+          until npm view "mcp-icloud@$TAG_VERSION" version >/dev/null 2>&1; do
+            sleep 30
           done
-          echo "mcp-icloud@$TAG_VERSION not visible on npm after 10 minutes"
-          exit 1
 
       - name: Install mcp-publisher
         run: |
