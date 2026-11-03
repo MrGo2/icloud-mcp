@@ -108,7 +108,7 @@ Module.prototype.require = function (id) {
   if (id === 'child_process') {
     return {
       ...realRequire.apply(this, arguments),
-      execFileSync: () => JSON.stringify({ service: 'iMessage', id: 1, identifier: '+34600000000', name: 'Someone', last_message_at: soon })
+      execFile: (cmd, args, opts, cb) => cb(null, JSON.stringify({ service: 'iMessage', id: 1, identifier: '+34600000000', name: 'Someone', last_message_at: soon }), '')
     };
   }
   return realRequire.apply(this, arguments);
