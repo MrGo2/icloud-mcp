@@ -64,7 +64,7 @@ async function handleReadEmail(args) {
   const local = isLocalMode();
 
   const email = local
-    ? await localClient.readEmail(args.uid)
+    ? await localClient.readEmail(args.uid, folder)
     : await cloudClient.readEmail(args.uid, folder);
 
   // Mail.app returns the body as `body`; mailparser returns `text`.
@@ -167,7 +167,7 @@ async function handleMarkAsRead(args) {
   const isRead = args.isRead !== false;
 
   if (isLocalMode()) {
-    await localClient.markAsRead(args.uid, isRead);
+    await localClient.markAsRead(args.uid, isRead, folder);
   } else {
     await cloudClient.markAsRead(args.uid, folder, isRead);
   }

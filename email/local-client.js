@@ -51,14 +51,41 @@ async function listEmails(folder = 'inbox', count = 25) {
 }
 
 /**
+ * JXA statements that set `mail` and `msg` to message `emailId`.
+ * Mail has no application-level messages collection, so
+ * `mail.messages.byId(id)` fails with -1728 (issue #15). A mailbox's
+ * `messages.byId(id)` works; the named folder is tried first.
+ * @param {string|number} emailId - Email ID
+ * @param {string} folder - Folder name
+ * @returns {string}
+ */
+function findMessageJXA(emailId, folder) {
+  const id = asInt(emailId);
+  return `
+    const mail = Application('Mail');
+    let msg = null;
+    for (const account of mail.accounts()) {
+      const mailboxes = [account.mailboxes.byName('${escapeJXA(getMailboxName(folder || 'inbox'))}')].concat(account.mailboxes());
+      for (const mailbox of mailboxes) {
+        if (!mailbox.exists()) continue;
+        const candidate = mailbox.messages.byId(${id});
+        if (candidate.exists()) { msg = candidate; break; }
+      }
+      if (msg) break;
+    }
+    if (!msg) throw new Error('Email not found: ${id}');
+  `;
+}
+
+/**
  * Read a specific email
  * @param {string} emailId - Email ID
+ * @param {string} [folder] - Folder to look in first
  * @returns {Promise<Object>} - Email content
  */
-async function readEmail(emailId) {
+async function readEmail(emailId, folder = 'inbox') {
   const script = `
-    const mail = Application('Mail');
-    const msg = mail.messages.byId(${asInt(emailId)});
+    ${findMessageJXA(emailId, folder)}
 
     JSON.stringify({
       id: msg.id(),
@@ -170,18 +197,18 @@ async function searchEmails({ query, from, subject, folder = 'inbox', count = 25
  * Mark email as read/unread
  * @param {string} emailId - Email ID
  * @param {boolean} isRead - Read status
+ * @param {string} [folder] - Folder to look in first
  * @returns {Promise<Object>} - Result
  */
-async function markAsRead(emailId, isRead = true) {
+async function markAsRead(emailId, isRead = true, folder = 'inbox') {
   const script = `
-    tell application "Mail"
-      set theMessage to message id ${asInt(emailId)}
-      set read status of theMessage to ${asBool(isRead, true)}
-    end tell
-    return "done"
+    ${findMessageJXA(emailId, folder)}
+    msg = msg.mailbox().messages.byId(${asInt(emailId)});
+    msg.readStatus = ${asBool(isRead, true)};
+    'done';
   `;
 
-  await runAppleScript(script);
+  await runJXA(script);
   return { success: true, message: `Email marked as ${isRead ? 'read' : 'unread'}` };
 }
 
@@ -216,18 +243,18 @@ async function listFolders() {
 /**
  * Delete an email
  * @param {string} emailId - Email ID
+ * @param {string} [folder] - Folder to look in first
  * @returns {Promise<Object>} - Result
  */
-async function deleteEmail(emailId) {
+async function deleteEmail(emailId, folder = 'inbox') {
   const script = `
-    tell application "Mail"
-      set theMessage to message id ${asInt(emailId)}
-      delete theMessage
-    end tell
-    return "deleted"
+    ${findMessageJXA(emailId, folder)}
+    msg = msg.mailbox().messages.byId(${asInt(emailId)});
+    mail.delete(msg);
+    'deleted';
   `;
 
-  await runAppleScript(script);
+  await runJXA(script);
   return { success: true, message: 'Email deleted' };
 }
 
