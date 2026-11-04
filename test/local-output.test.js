@@ -34,13 +34,14 @@ const later = new Date(Date.now() + 7200 * 1000).toISOString();
 function fakeOsascript(script) {
   const has = (s) => script.includes(s);
 
-  if (has("Application('Contacts')")) {
-    if (has('accounts()') && has('groupCount')) {
-      return JSON.stringify([{ id: 'acct-1', name: 'iCloud', groupCount: 2 }]);
-    }
-    if (has('group.name()') || has('contactCount')) {
+  if (has('CNContactStore')) {
+    if (has('contactCount')) {
       return JSON.stringify([{ id: 'grp-1', name: 'Family', accountId: 'acct-1', accountName: 'iCloud', contactCount: 3 }]);
     }
+    return JSON.stringify([{ id: 'acct-1', name: 'iCloud', type: 'cardDAV', groupCount: 2 }]);
+  }
+
+  if (has("Application('Contacts')")) {
     return JSON.stringify([{
       id: 'person-1', name: 'Ada Lovelace', firstName: 'Ada', lastName: 'Lovelace',
       organization: 'Analytical Engines', jobTitle: 'Mathematician',
