@@ -255,6 +255,7 @@ Call `about` for the active mode and service list, and `check-auth-status` to co
 | `ICLOUD_EMAIL` | (unset) | iCloud address, cloud mode only |
 | `ICLOUD_APP_PASSWORD` | (unset) | App-specific password, cloud mode only |
 | `ICLOUD_MCP_IMSG_PATH` | (unset) | Explicit path to the `imsg` binary |
+| `ICLOUD_TIMEZONE` | `UTC` | IANA time zone used to format dates, e.g. `Europe/Madrid` |
 
 Read from the environment, or from a `.env` file beside the module. See `.env.example`.
 
