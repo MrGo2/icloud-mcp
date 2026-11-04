@@ -214,7 +214,7 @@ The server otherwise looks in `ICLOUD_MCP_IMSG_PATH`, `IMSG_PATH`, both Homebrew
 
 Mail.app tools iterate messages through AppleScript, which is slow on very large mailboxes and can exceed the Apple Event timeout before returning. Narrow the request with `folder` and a smaller `count`, or use cloud mode, where IMAP does the filtering server-side. This is a property of the AppleScript bridge, not something the server can work around.
 
-### Known limitation: large calendar sets
+### Calendar access (local mode)
 
 `list-events` in local mode no longer scripts Calendar.app when it can avoid it. It reads the date window straight from EventKit, the macOS calendar store, in one query that returns in about a tenth of a second even with dozens of subscribed calendars. EventKit needs its own permission, separate from Automation: the first `list-events` call asks the program that launches the server (Claude Desktop, your terminal, or your editor) for access to your calendars. Approve it once, or grant it later under **System Settings → Privacy & Security → Calendars**.
 
@@ -264,7 +264,7 @@ pnpm test          # unit + contract suites, and a live stdio session
 pnpm run inspect   # drive the server with the MCP Inspector
 ```
 
-The test suites stub `osascript` and the `imsg` CLI, so they touch no real mail, calendar or message data and run on any OS.
+The test suites stub `osascript` and the `imsg` CLI, so they touch no real mail, calendar or message data. They need macOS, because local mode refuses to start elsewhere; CI runs them on a macOS runner.
 
 ## License
 

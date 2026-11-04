@@ -253,6 +253,6 @@ committed lockfile).
 | MCP registry name | `io.github.mrgo2/icloud-mcp` (`mcpName` in package.json, `server.json` at the repo root) |
 | MCP server name (wire) | `icloud-mcp` — reported in `initialize`, unchanged by the npm rename |
 | Desktop bundle | `mcpb pack` produces `icloud-mcp.mcpb`; `.mcpbignore` keeps `test/`, `docs/`, `.claude/` and `.remember/` out of it |
-| CI | `.github/workflows/ci.yml` — pnpm, Node 20 + 22 on ubuntu, plus an inspector smoke on 22 |
+| CI | `.github/workflows/ci.yml` — pnpm, Node 20 + 22 on macOS (local mode is macOS-only), plus an inspector smoke on 22. Releases: `release.yml` stages on npm; a maintainer approves with 2FA |
 
 Release artifacts (`*.mcpb`, `*.tgz`) are gitignored: they are built, not source.
