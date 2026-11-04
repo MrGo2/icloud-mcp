@@ -209,7 +209,7 @@ const calendarTools = [
   {
     name: 'update-event',
     title: 'Update Event',
-    description: 'Updates an existing calendar event. Only the fields you pass are changed. In cloud mode the CalDAV property-merge preserves recurrence, invitees and alarms (experimental: the live round-trip is not yet verified).',
+    description: 'Updates an existing calendar event. Only the fields you pass are changed. In cloud mode the CalDAV property-merge preserves recurrence, invitees and alarms (experimental: the live round-trip is not yet verified). In local mode, every occurrence of a recurring event shares the series UID, so this acts on the whole series, not one occurrence.',
     inputSchema: {
       eventUrl: z.string().describe('Event handle from list-events: the URL in cloud mode, the UID in local mode'),
       summary: z.string().optional().describe('New event title (optional)'),
@@ -224,7 +224,7 @@ const calendarTools = [
   {
     name: 'delete-event',
     title: 'Delete Event',
-    description: 'Deletes a calendar event',
+    description: 'Deletes a calendar event. In local mode, every occurrence of a recurring event shares the series UID, so this acts on the whole series, not one occurrence.',
     inputSchema: {
       eventUrl: z.string().describe('Event handle from list-events: the URL in cloud mode, the UID in local mode')
     },

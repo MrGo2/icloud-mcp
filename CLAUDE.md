@@ -24,7 +24,7 @@ Use `set-mode` to switch between modes **without restarting**:
 | Service | Protocol | Tools |
 |---------|----------|-------|
 | **Email** | Mail.app (AppleScript) | 6 |
-| **Calendar** | Calendar.app (AppleScript) | 5 |
+| **Calendar** | EventKit (`list-events`) + Calendar.app (AppleScript) | 5 |
 | **Contacts** | Contacts.app (AppleScript) | 7 |
 | **Reminders** | Reminders.app (AppleScript) | 7 |
 | **Notes** | Notes.app (AppleScript) | 5 |
@@ -141,7 +141,14 @@ icloud-mcp/
 - `list-folders` - List mail folders
 
 ### Calendar (5)
-- `list-events` - List upcoming events
+- `list-events` - List upcoming events. LOCAL reads EventKit when the host has
+  full Calendars access (one store query, ~0.1 s on 26 calendars), requesting it
+  once per process if undecided (polled, 25 s cap). Denied, restricted or no
+  answer falls back to the Calendar.app `whose` query with a stderr line
+  `[icloud-mcp] list-events: EventKit unavailable (status N)…`. `id` is
+  `calendarItemIdentifier`, which equals Calendar.app's `uid`. Recurring events
+  come back once per occurrence, all sharing the series id, so local
+  `update-event`/`delete-event` on such an id act on the whole series.
 - `list-calendars` - List calendars
 - `create-event` - Create event
 - `update-event` - Update event (cloud/CalDAV; preserves RRULE, attendees, alarms)
@@ -199,6 +206,8 @@ When first used, macOS will prompt for access to:
 - Safari
 
 Grant access in **System Settings > Privacy & Security > Automation**.
+`list-events` also asks once for **Privacy & Security > Calendars** (EventKit),
+a separate grant attached to the host app (Claude Desktop, terminal…).
 
 ## Limitations
 

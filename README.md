@@ -216,7 +216,11 @@ Mail.app tools iterate messages through AppleScript, which is slow on very large
 
 ### Known limitation: large calendar sets
 
-`list-events` in local mode suffers the same AppleScript wall. The date window is already filtered inside Calendar.app with a `whose` query, but on accounts with many calendars, especially subscribed ones carrying years of events (holidays, sports fixtures, travel feeds), the query can still exceed any reasonable timeout. `list-calendars` and the event write tools are not affected. Until the planned EventKit backend lands (see [#10](https://github.com/MrGo2/icloud-mcp/issues/11)), use cloud mode for reading events: CalDAV filters server-side and is fast at any scale.
+`list-events` in local mode no longer scripts Calendar.app when it can avoid it. It reads the date window straight from EventKit, the macOS calendar store, in one query that returns in about a tenth of a second even with dozens of subscribed calendars. EventKit needs its own permission, separate from Automation: the first `list-events` call asks the program that launches the server (Claude Desktop, your terminal, or your editor) for access to your calendars. Approve it once, or grant it later under **System Settings → Privacy & Security → Calendars**.
+
+If that access is denied, restricted or left unanswered, `list-events` falls back to the old Calendar.app query and logs `EventKit unavailable` on stderr. That path still filters the window inside Calendar.app with a `whose` query, but on accounts with many calendars, especially subscribed ones carrying years of events (holidays, sports fixtures, travel feeds), it can exceed any reasonable timeout. In that case grant Calendars access, or use cloud mode, where CalDAV filters server-side (see [#11](https://github.com/MrGo2/icloud-mcp/issues/11)).
+
+Through EventKit, a recurring event appears once per occurrence in the window, and every occurrence carries the series id. Passing that id to `update-event` or `delete-event` in local mode changes or deletes the whole series.
 
 ### App-specific password (cloud mode)
 
