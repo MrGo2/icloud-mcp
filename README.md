@@ -24,7 +24,7 @@ icloud-mcp covers seven Apple services with two interchangeable backends, and as
 
 ## Features
 
-The server exposes 41 tools across Email, Calendar, Contacts, Reminders, Notes, Messages and Safari. Each tool carries a typed schema, a human title and behavioural annotations, and every `list-*` tool returns machine-readable `structuredContent` alongside its text output. Local mode needs no passwords at all; macOS Automation permissions take their place.
+The server exposes 41 tools across Email, Calendar, Contacts, Reminders, Notes, Messages and Safari. Each tool carries a typed schema, a human title and behavioural annotations, and every `list-*` tool returns machine-readable `structuredContent` alongside its text output. Local mode needs no passwords at all; macOS privacy permissions take their place: Automation for the apps, plus one-time Calendars and Contacts prompts for `list-events` and the contact account/group tools, and Full Disk Access for reading messages.
 
 ## Access and security model
 
@@ -78,7 +78,7 @@ Tools marked local only return an error in cloud mode, because the iCloud protoc
 - **read-contact**: `contactUrl` (string)
 - **create-contact**: `displayName`, `firstName`, `lastName`, `email`, `phone`, `organization`, `title`, `notes` (all optional)
 - **delete-contact**: `contactUrl` (string)
-- **list-contact-accounts**: no input (local only)
+- **list-contact-accounts**: no input (local only). Returns each account's `id`, `name`, `type` (`cardDAV`, `exchange`, `local`) and `groupCount`
 - **list-contact-groups**: `accountId` (string, optional) (local only)
 
 ### Reminders (local only)
