@@ -5,6 +5,7 @@
 
 const { z } = require('zod');
 const config = require('../config');
+const { version } = require('../package.json');
 const { formatSuccess, formatError } = require('../utils/error-handler');
 const { getMode, setMode, isLocalMode } = require('../mode');
 
@@ -38,7 +39,7 @@ async function handleAbout() {
   const cloudServices = 'Email, Calendar, Contacts';
 
   return formatSuccess(
-    `iCloud MCP Server v2.1.0
+    `iCloud MCP Server v${version}
 
 Mode: ${mode.toUpperCase()}
 Services: ${mode === 'local' ? localServices : cloudServices}
