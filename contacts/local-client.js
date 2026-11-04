@@ -270,33 +270,41 @@ async function deleteContact(contactId) {
   return { success: true, message: 'Contact deleted successfully' };
 }
 
+// Contacts.app's scripting dictionary has no "account" class, so
+// `Application('Contacts').accounts()` always fails with -1708 (#21).
+// Accounts are CNContainers in the Contacts framework, reached through the
+// JXA ObjC bridge; the first call shows the Contacts permission prompt
+// (Privacy & Security > Contacts) for the app hosting the server.
+const CONTACTS_PRELUDE = `
+  ObjC.import('Contacts');
+  const store = $.CNContactStore.alloc.init;
+  const TYPES = { 1: 'local', 2: 'exchange', 3: 'cardDAV' };
+  const containers = store.containersMatchingPredicateError($(), $());
+  if (!containers || containers.isNil()) {
+    throw new Error('Contacts access denied. Grant it under System Settings > Privacy & Security > Contacts.');
+  }
+  const groupsIn = (containerId) =>
+    store.groupsMatchingPredicateError($.CNGroup.predicateForGroupsInContainerWithIdentifier(containerId), $());
+  const each = (list, fn) => { for (let i = 0; i < list.count; i++) fn(list.objectAtIndex(i)); };
+`;
+
 /**
- * List all contact accounts (iCloud, Google, etc.)
+ * List all contact accounts (iCloud, Google, Exchange, On My Mac)
  * @returns {Promise<Array>} - List of accounts
  */
 async function listAccounts() {
   const script = `
-    const contacts = Application('Contacts');
-    const accounts = contacts.accounts();
-    let result = [];
-
-    for (let account of accounts) {
-      try {
-        const groups = account.groups();
-        result.push({
-          id: account.id(),
-          name: account.name(),
-          groupCount: groups.length
-        });
-      } catch (e) {
-        result.push({
-          id: account.id(),
-          name: account.name(),
-          groupCount: 0
-        });
-      }
-    }
-
+    ${CONTACTS_PRELUDE}
+    const result = [];
+    each(containers, (c) => {
+      const id = ObjC.unwrap(c.identifier);
+      result.push({
+        id,
+        name: ObjC.unwrap(c.name) || '',
+        type: TYPES[Number(c.type)] || 'unknown',
+        groupCount: Number(groupsIn(id).count)
+      });
+    });
     JSON.stringify(result);
   `;
 
@@ -310,49 +318,26 @@ async function listAccounts() {
  * @returns {Promise<Array>} - List of groups
  */
 async function listGroups(accountId = null) {
-  const script = accountId ? `
-    const contacts = Application('Contacts');
-    const account = contacts.accounts.byId("${escapeJXA(accountId)}");
-    const groups = account.groups();
-    let result = [];
-
-    for (let group of groups) {
-      try {
-        const people = group.people();
+  const script = `
+    ${CONTACTS_PRELUDE}
+    const wanted = ${JSON.stringify(accountId)};
+    const result = [];
+    each(containers, (c) => {
+      const cid = ObjC.unwrap(c.identifier);
+      if (wanted && cid !== wanted) return;
+      each(groupsIn(cid), (g) => {
+        const gid = ObjC.unwrap(g.identifier);
+        const people = store.unifiedContactsMatchingPredicateKeysToFetchError(
+          $.CNContact.predicateForContactsInGroupWithIdentifier(gid), $([]), $());
         result.push({
-          id: group.id(),
-          name: group.name(),
-          accountId: "${escapeJXA(accountId)}",
-          accountName: account.name(),
-          contactCount: people.length
+          id: gid,
+          name: ObjC.unwrap(g.name) || '',
+          accountId: cid,
+          accountName: ObjC.unwrap(c.name) || '',
+          contactCount: people && !people.isNil() ? Number(people.count) : 0
         });
-      } catch (e) {}
-    }
-
-    JSON.stringify(result);
-  ` : `
-    const contacts = Application('Contacts');
-    const accounts = contacts.accounts();
-    let result = [];
-
-    for (let account of accounts) {
-      try {
-        const groups = account.groups();
-        for (let group of groups) {
-          try {
-            const people = group.people();
-            result.push({
-              id: group.id(),
-              name: group.name(),
-              accountId: account.id(),
-              accountName: account.name(),
-              contactCount: people.length
-            });
-          } catch (e) {}
-        }
-      } catch (e) {}
-    }
-
+      });
+    });
     JSON.stringify(result);
   `;
 

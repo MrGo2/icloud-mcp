@@ -160,8 +160,10 @@ icloud-mcp/
 - `read-contact` - Get contact details
 - `create-contact` - Create contact
 - `delete-contact` - Delete contact
-- `list-contact-accounts` - List accounts (local only)
-- `list-contact-groups` - List groups (local only)
+- `list-contact-accounts` - List accounts (local only). Via the Contacts
+  framework (CNContainer), not Contacts.app: its dictionary has no `account`
+  class, so `accounts()` always failed with -1708 (#21).
+- `list-contact-groups` - List groups (local only), same framework
 
 ### Reminders (7) - Local only
 - `list-reminder-lists` - List reminder lists
@@ -207,7 +209,9 @@ When first used, macOS will prompt for access to:
 
 Grant access in **System Settings > Privacy & Security > Automation**.
 `list-events` also asks once for **Privacy & Security > Calendars** (EventKit),
-a separate grant attached to the host app (Claude Desktop, terminal…).
+and `list-contact-accounts`/`list-contact-groups` for **Privacy & Security >
+Contacts** (Contacts framework): separate grants attached to the host app
+(Claude Desktop, terminal…).
 
 ## Limitations
 

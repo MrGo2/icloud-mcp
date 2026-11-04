@@ -198,6 +198,10 @@ tccutil reset AppleEvents
 
 That clears Automation permissions for every app, so expect the prompts to return on next use.
 
+### Contacts access (accounts and groups)
+
+`list-contact-accounts` and `list-contact-groups` read accounts and groups through the macOS Contacts framework, because Contacts.app's scripting interface has no notion of accounts. The first call asks the program that launches the server for access to your contacts. Approve it once, or grant it later under **System Settings → Privacy & Security → Contacts**.
+
 ### Full Disk Access (reading messages)
 
 `list-chats` and `read-messages` read the Messages database through the `imsg` CLI, which is gated by Full Disk Access, not Automation. Grant it to the program that launches the server (Claude Desktop, your terminal, or your editor) under **System Settings → Privacy & Security → Full Disk Access**. Without it, those tools report that Full Disk Access is required.
