@@ -1,106 +1,267 @@
 /**
  * Local Email Client
- * Accesses Mail.app via AppleScript
+ * Accesses Mail.app via JXA (send uses AppleScript)
+ *
+ * Mail has no application-level `messages` collection, so
+ * `mail.messages.byId(n)` fails with -1728. `mailbox.messages.byId(n)` works,
+ * and Mail resolves it by id alone: a few milliseconds per property, even on
+ * a mailbox of thousands of messages. Index access (`messages[i]`) and
+ * `whose` filters cost about a second each on such a mailbox, and
+ * `mailbox.messages()` followed by per-message reads costs thousands.
+ *
+ * So every operation reads message ids in one bulk event (plus the one or two
+ * properties a search filters on), picks ids in this process, and reads
+ * details through `byId`. Bodies are read one message at a time, and Mail
+ * may fetch one from the server first (one took 35 s on a Gmail inbox), so a
+ * text query searches the newest BODY_SCAN bodies and stops reading bodies
+ * after BODY_BUDGET_MS; search reports what it covered.
  */
 
-const { runAppleScript, runJXA, escapeAppleScript, escapeJXA, asInt, asBool } = require('../utils/applescript');
-const config = require('../config');
+const { runAppleScript, runJXA, escapeAppleScript, asInt, asBool } = require('../utils/applescript');
+
+const BODY_SCAN = 20;
+const BODY_BUDGET_MS = 10000;
+const MAX_COUNT = 50;
+// Mail runs Apple events one at a time and keeps working on an event after
+// the client gives up, so calls are queued here and bounded in time.
+const MAIL_TIMEOUT_MS = 90000;
+
+let mailQueue = Promise.resolve();
 
 /**
- * List emails from a mailbox
- * @param {string} folder - Folder name (inbox, sent, drafts, etc.)
- * @param {number} count - Number of emails to retrieve
- * @returns {Promise<Array>} - List of emails
+ * Run a Mail JXA script after any earlier Mail script has finished.
+ * @param {string} script
+ * @returns {Promise<string>}
  */
-async function listEmails(folder = 'inbox', count = 25) {
-  const mailboxName = getMailboxName(folder);
-
-  const script = `
-    ObjC.import('Foundation');
-    const mail = Application('Mail');
-    const accounts = mail.accounts();
-    let emails = [];
-
-    for (let account of accounts) {
-      try {
-        const mailbox = account.mailboxes.byName('${escapeJXA(mailboxName)}');
-        const messages = mailbox.messages();
-        const limit = Math.min(${asInt(count, 25)}, messages.length);
-
-        for (let i = 0; i < limit; i++) {
-          const msg = messages[i];
-          emails.push({
-            id: msg.id(),
-            subject: msg.subject(),
-            from: msg.sender(),
-            date: msg.dateReceived().toISOString(),
-            read: msg.readStatus(),
-            account: account.name()
-          });
-        }
-      } catch (e) {
-        // Mailbox might not exist in this account
-      }
-    }
-
-    JSON.stringify(emails.slice(0, ${count}));
-  `;
-
-  const result = await runJXA(script);
-  return result ? JSON.parse(result) : [];
+function runMail(script) {
+  const run = mailQueue.then(() => runJXA(script, { timeoutMs: MAIL_TIMEOUT_MS }));
+  mailQueue = run.catch(() => {});
+  return run;
 }
 
 /**
- * JXA statements that set `mail` and `msg` to message `emailId`.
- * Mail has no application-level messages collection, so
- * `mail.messages.byId(id)` fails with -1728 (issue #15). A mailbox's
- * `messages.byId(id)` works; the named folder is tried first.
- * @param {string|number} emailId - Email ID
- * @param {string} folder - Folder name
+ * @param {number} count
+ * @returns {number}
+ */
+function clampCount(count) {
+  const n = asInt(count, 25);
+  return Math.min(Math.max(n, 1), MAX_COUNT);
+}
+
+/**
+ * Map folder names to Mail.app mailbox names
+ */
+function getMailboxName(folder) {
+  const mapping = {
+    'inbox': 'INBOX',
+    'sent': 'Sent Messages',
+    'drafts': 'Drafts',
+    'trash': 'Deleted Messages',
+    'archive': 'Archive',
+    'junk': 'Junk'
+  };
+  return mapping[String(folder || 'inbox').toLowerCase()] || folder;
+}
+
+// Shared JXA helpers. User input reaches the script only as the JSON literal
+// assigned to ARGS, never spliced into code.
+const JXA_PRELUDE = `
+  const mail = Application('Mail');
+  function accountsFor(name) {
+    if (!name) return mail.accounts();
+    const a = mail.accounts.byName(name);
+    if (!a.exists()) throw new Error('No Mail account named ' + JSON.stringify(name));
+    return [a];
+  }
+  function mailboxIn(acct, name) {
+    const mb = acct.mailboxes.byName(name);
+    return mb.exists() ? mb : null;
+  }
+  function iso(d) { return d ? d.toISOString() : ''; }
+  function newestFirst(items, n) {
+    return items.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0)).slice(0, n);
+  }
+  function summary(m, acctName) {
+    return { id: m.id(), subject: m.subject() || '', from: m.sender() || '',
+      date: iso(m.dateReceived()), read: m.readStatus(), account: acctName };
+  }
+`;
+
+/**
+ * @param {Object} args - Values passed to the script as JSON
+ * @param {string} body - JXA statements using ARGS; must return a value
  * @returns {string}
  */
-function findMessageJXA(emailId, folder) {
-  const id = asInt(emailId);
-  return `
-    const mail = Application('Mail');
-    let msg = null;
-    for (const account of mail.accounts()) {
-      const mailboxes = [account.mailboxes.byName('${escapeJXA(getMailboxName(folder || 'inbox'))}')].concat(account.mailboxes());
-      for (const mailbox of mailboxes) {
-        if (!mailbox.exists()) continue;
-        const candidate = mailbox.messages.byId(${id});
-        if (candidate.exists()) { msg = candidate; break; }
-      }
-      if (msg) break;
-    }
-    if (!msg) throw new Error('Email not found: ${id}');
-  `;
+function jxa(args, body) {
+  return `${JXA_PRELUDE}
+  const ARGS = ${JSON.stringify(args)};
+  function main() {
+${body}
+  }
+  JSON.stringify(main());
+`;
 }
 
 /**
- * Read a specific email
- * @param {string} emailId - Email ID
- * @param {string} [folder] - Folder to look in first
- * @returns {Promise<Object>} - Email content
+ * @param {string} folder
+ * @param {number} count
+ * @param {string|null} account
+ * @returns {string}
  */
-async function readEmail(emailId, folder = 'inbox') {
-  const script = `
-    ${findMessageJXA(emailId, folder)}
+function buildListScript(folder = 'inbox', count = 25, account = null) {
+  return jxa({ mailbox: getMailboxName(folder), count: clampCount(count), account: account || null }, `
+    const groups = [];
+    for (const acct of accountsFor(ARGS.account)) {
+      const mb = mailboxIn(acct, ARGS.mailbox);
+      if (mb) groups.push({ mb: mb, acctName: acct.name(), ids: mb.messages.id().slice(0, ARGS.count) });
+    }
+    let picks = [];
+    for (const g of groups) for (const id of g.ids) picks.push({ g: g, id: id, date: '' });
+    // Several accounts: read only the dates to pick the newest, then summaries.
+    if (groups.length > 1) {
+      for (const p of picks) p.date = iso(p.g.mb.messages.byId(p.id).dateReceived());
+      picks = newestFirst(picks, ARGS.count);
+    }
+    return picks.map(p => summary(p.g.mb.messages.byId(p.id), p.g.acctName));
+  `);
+}
 
-    JSON.stringify({
-      id: msg.id(),
-      subject: msg.subject(),
-      from: msg.sender(),
-      to: msg.toRecipients().map(r => r.address()),
-      cc: msg.ccRecipients().map(r => r.address()),
-      date: msg.dateReceived().toISOString(),
-      body: msg.content(),
-      read: msg.readStatus()
-    });
-  `;
+/**
+ * Statements that set `m` to the message ARGS.id, or throw. The named mailbox
+ * is tried first; Mail resolves `byId` by id alone, so the fallback over every
+ * mailbox only runs for an id that does not exist.
+ */
+const FIND_MESSAGE = `
+    let m = null;
+    const accts = accountsFor(ARGS.account);
+    const candidates = [];
+    for (const acct of accts) {
+      const mb = mailboxIn(acct, ARGS.mailbox);
+      if (mb) candidates.push(mb);
+    }
+    for (const acct of accts) candidates.push(...acct.mailboxes());
+    for (const mb of candidates) {
+      const c = mb.messages.byId(ARGS.id);
+      if (c.exists()) { m = c; break; }
+    }
+    if (!m) throw new Error('Email not found: ' + ARGS.id);
+`;
 
-  const result = await runJXA(script);
-  return result ? JSON.parse(result) : null;
+// Writes go through a specifier rooted in the message's own mailbox rather
+// than the one the lookup happened to use.
+const ANCHOR_MESSAGE = `
+    m = m.mailbox().messages.byId(ARGS.id);
+    if (m.id() !== ARGS.id) throw new Error('Email not found: ' + ARGS.id);
+`;
+
+function lookupArgs(emailId, folder, account) {
+  return { id: asInt(emailId), mailbox: getMailboxName(folder || 'inbox'), account: account || null };
+}
+
+function buildReadScript(emailId, folder = 'inbox', account = null) {
+  return jxa(lookupArgs(emailId, folder, account), `${FIND_MESSAGE}
+    const where = m.mailbox();
+    const email = summary(m, where.account().name());
+    email.mailbox = where.name();
+    email.to = m.toRecipients.address();
+    email.cc = m.ccRecipients.address();
+    email.body = m.content() || '';
+    return email;
+  `);
+}
+
+function buildMarkAsReadScript(emailId, isRead = true, folder = 'inbox', account = null) {
+  const args = { ...lookupArgs(emailId, folder, account), isRead: asBool(isRead, true) };
+  return jxa(args, `${FIND_MESSAGE}${ANCHOR_MESSAGE}
+    m.readStatus = ARGS.isRead;
+    return 'done';
+  `);
+}
+
+function buildDeleteScript(emailId, folder = 'inbox', account = null) {
+  return jxa(lookupArgs(emailId, folder, account), `${FIND_MESSAGE}${ANCHOR_MESSAGE}
+    mail.delete(m);
+    return 'deleted';
+  `);
+}
+
+/**
+ * One script per search. For each account's mailbox: bulk-read ids plus the
+ * properties the filters need, match in JS, then read summaries of up to
+ * `count` hits by id. Hits from all accounts are merged newest first. A hit
+ * whose subject or sender no longer matches its bulk row means mail arrived
+ * between the bulk reads; that mailbox is read again once.
+ */
+function buildSearchScript({ query, from, subject, unreadOnly = false, folder = 'inbox', count = 25, account = null } = {}) {
+  const args = {
+    mailbox: getMailboxName(folder || 'inbox'),
+    account: account || null,
+    count: clampCount(count),
+    query: query ? String(query).toLowerCase() : '',
+    from: from ? String(from).toLowerCase() : '',
+    subject: subject ? String(subject).toLowerCase() : '',
+    unreadOnly: !!unreadOnly,
+    bodyScan: BODY_SCAN,
+    bodyBudgetMs: BODY_BUDGET_MS
+  };
+  return jxa(args, `
+    const items = [];
+    const scope = [];
+    const lc = (v) => String(v || '').toLowerCase();
+    const bodyDeadline = Date.now() + ARGS.bodyBudgetMs;
+    function scan(mb, acctName, want, s) {
+      const msgs = mb.messages;
+      const unread = ARGS.unreadOnly ? msgs.whose({ readStatus: false }).id() : null;
+      if (!ARGS.query && !ARGS.from && !ARGS.subject) {
+        s.scanned = unread.length;
+        s.bodyWindow = 0;
+        return unread.slice(0, want).map(id => summary(msgs.byId(id), acctName));
+      }
+      const ids = msgs.id();
+      const subjects = (ARGS.query || ARGS.subject) ? msgs.subject() : null;
+      const senders = ARGS.from ? msgs.sender() : null;
+      if ((subjects && subjects.length !== ids.length) || (senders && senders.length !== ids.length)) return null;
+      const unreadSet = unread ? new Set(unread) : null;
+      const hits = [];
+      let bodyEnd = Math.min(ARGS.bodyScan, ids.length);
+      let i = 0;
+      for (; i < ids.length && hits.length < want; i++) {
+        if (unreadSet && !unreadSet.has(ids[i])) continue;
+        const subj = subjects ? lc(subjects[i]) : '';
+        if (ARGS.from && lc(senders[i]).indexOf(ARGS.from) === -1) continue;
+        if (ARGS.subject && subj.indexOf(ARGS.subject) === -1) continue;
+        if (ARGS.query && subj.indexOf(ARGS.query) === -1) {
+          if (i >= bodyEnd) continue;
+          if (Date.now() > bodyDeadline) { bodyEnd = i; continue; }
+          if (lc(msgs.byId(ids[i]).content()).indexOf(ARGS.query) === -1) continue;
+        }
+        hits.push(i);
+      }
+      s.messages = ids.length;
+      s.scanned = i;
+      s.bodyWindow = ARGS.query ? bodyEnd : 0;
+      const out = [];
+      for (const i of hits) {
+        const e = summary(msgs.byId(ids[i]), acctName);
+        if (subjects && lc(e.subject) !== lc(subjects[i])) return null;
+        if (senders && lc(e.from) !== lc(senders[i])) return null;
+        out.push(e);
+      }
+      return out;
+    }
+    for (const acct of accountsFor(ARGS.account)) {
+      const mb = mailboxIn(acct, ARGS.mailbox);
+      if (!mb) continue;
+      const acctName = acct.name();
+      const s = { account: acctName, mailbox: ARGS.mailbox, scanned: 0 };
+      let found = scan(mb, acctName, ARGS.count, s);
+      if (found === null) found = scan(mb, acctName, ARGS.count, s);
+      if (found === null) throw new Error('Mailbox ' + acctName + '/' + ARGS.mailbox + ' kept changing during the search; try again');
+      items.push(...found);
+      scope.push(s);
+    }
+    return { items: newestFirst(items, ARGS.count), scope: scope };
+  `);
 }
 
 /**
@@ -146,69 +307,74 @@ async function sendEmail({ to, cc, bcc, subject, body }) {
 }
 
 /**
+ * Run a Mail script and parse its JSON output. osascript reports a thrown
+ * error as "execution error: Error: Error: <message> (-2700)"; keep the message.
+ * @param {string} script
+ * @returns {Promise<*>}
+ */
+async function runMailJSON(script) {
+  let result;
+  try {
+    result = await runMail(script);
+  } catch (e) {
+    const m = /execution error: (?:Error: )*(.*?)(?: \(-?\d+\))?\s*$/s.exec(e.message || '');
+    if (m) e.message = m[1];
+    throw e;
+  }
+  return parseResult(result);
+}
+
+/**
+ * Parse a Mail script's JSON output.
+ * @param {string} result
+ * @returns {*}
+ */
+function parseResult(result) {
+  if (!result) throw new Error('Mail returned no output');
+  return JSON.parse(result);
+}
+
+/**
+ * List emails from a mailbox, newest first
+ * @param {string} folder - Folder name (inbox, sent, drafts, etc.)
+ * @param {number} count - Number of emails to retrieve
+ * @param {string} [account] - Mail account name; omit to fill count from accounts in Mail's order
+ * @returns {Promise<Array>} - List of emails
+ */
+async function listEmails(folder = 'inbox', count = 25, account = null) {
+  return runMailJSON(buildListScript(folder, count, account));
+}
+
+/**
+ * Read a specific email
+ * @param {string} emailId - Email ID
+ * @param {string} [folder] - Mailbox to look in first
+ * @param {string} [account] - Mail account name
+ * @returns {Promise<Object>} - Email content
+ */
+async function readEmail(emailId, folder = 'inbox', account = null) {
+  return runMailJSON(buildReadScript(emailId, folder, account));
+}
+
+/**
  * Search emails
  * @param {Object} options - Search options
- * @returns {Promise<Array>} - Matching emails
+ * @returns {Promise<{items: Array, scope: Array}>} - Matching emails and what was searched
  */
-async function searchEmails({ query, from, subject, folder = 'inbox', count = 25 }) {
-  const mailboxName = getMailboxName(folder);
-
-  let conditions = [];
-  if (query) conditions.push(`(msg.subject().toLowerCase().includes("${escapeJXA(query.toLowerCase())}") || msg.content().toLowerCase().includes("${escapeJXA(query.toLowerCase())}"))`);
-  if (from) conditions.push(`msg.sender().toLowerCase().includes("${escapeJXA(from.toLowerCase())}")`);
-  if (subject) conditions.push(`msg.subject().toLowerCase().includes("${escapeJXA(subject.toLowerCase())}")`);
-
-  const filterCondition = conditions.length > 0 ? conditions.join(' && ') : 'true';
-
-  const script = `
-    const mail = Application('Mail');
-    const accounts = mail.accounts();
-    let emails = [];
-
-    for (let account of accounts) {
-      try {
-        const mailbox = account.mailboxes.byName('${escapeJXA(mailboxName)}');
-        const messages = mailbox.messages();
-
-        for (let i = 0; i < messages.length && emails.length < ${asInt(count, 25)}; i++) {
-          const msg = messages[i];
-          if (${filterCondition}) {
-            emails.push({
-              id: msg.id(),
-              subject: msg.subject(),
-              from: msg.sender(),
-              date: msg.dateReceived().toISOString(),
-              read: msg.readStatus(),
-              account: account.name()
-            });
-          }
-        }
-      } catch (e) {}
-    }
-
-    JSON.stringify(emails);
-  `;
-
-  const result = await runJXA(script);
-  return result ? JSON.parse(result) : [];
+async function searchEmails({ query, from, subject, unreadOnly, folder = 'inbox', count = 25, account = null } = {}) {
+  return runMailJSON(buildSearchScript({ query, from, subject, unreadOnly, folder, count, account }));
 }
 
 /**
  * Mark email as read/unread
  * @param {string} emailId - Email ID
  * @param {boolean} isRead - Read status
- * @param {string} [folder] - Folder to look in first
+ * @param {string} [folder] - Mailbox to look in first
+ * @param {string} [account] - Mail account name
  * @returns {Promise<Object>} - Result
  */
-async function markAsRead(emailId, isRead = true, folder = 'inbox') {
-  const script = `
-    ${findMessageJXA(emailId, folder)}
-    msg = msg.mailbox().messages.byId(${asInt(emailId)});
-    msg.readStatus = ${asBool(isRead, true)};
-    'done';
-  `;
-
-  await runJXA(script);
+async function markAsRead(emailId, isRead = true, folder = 'inbox', account = null) {
+  await runMailJSON(buildMarkAsReadScript(emailId, isRead, folder, account));
   return { success: true, message: `Email marked as ${isRead ? 'read' : 'unread'}` };
 }
 
@@ -236,41 +402,20 @@ async function listFolders() {
     JSON.stringify(folders);
   `;
 
-  const result = await runJXA(script);
+  const result = await runMail(script);
   return result ? JSON.parse(result) : [];
 }
 
 /**
  * Delete an email
  * @param {string} emailId - Email ID
- * @param {string} [folder] - Folder to look in first
+ * @param {string} [folder] - Mailbox to look in first
+ * @param {string} [account] - Mail account name
  * @returns {Promise<Object>} - Result
  */
-async function deleteEmail(emailId, folder = 'inbox') {
-  const script = `
-    ${findMessageJXA(emailId, folder)}
-    msg = msg.mailbox().messages.byId(${asInt(emailId)});
-    mail.delete(msg);
-    'deleted';
-  `;
-
-  await runJXA(script);
+async function deleteEmail(emailId, folder = 'inbox', account = null) {
+  await runMailJSON(buildDeleteScript(emailId, folder, account));
   return { success: true, message: 'Email deleted' };
-}
-
-/**
- * Map folder names to Mail.app mailbox names
- */
-function getMailboxName(folder) {
-  const mapping = {
-    'inbox': 'INBOX',
-    'sent': 'Sent Messages',
-    'drafts': 'Drafts',
-    'trash': 'Deleted Messages',
-    'archive': 'Archive',
-    'junk': 'Junk'
-  };
-  return mapping[folder.toLowerCase()] || folder;
 }
 
 module.exports = {
@@ -280,5 +425,12 @@ module.exports = {
   searchEmails,
   markAsRead,
   listFolders,
-  deleteEmail
+  deleteEmail,
+  buildListScript,
+  buildReadScript,
+  buildSearchScript,
+  buildMarkAsReadScript,
+  buildDeleteScript,
+  BODY_SCAN,
+  BODY_BUDGET_MS
 };

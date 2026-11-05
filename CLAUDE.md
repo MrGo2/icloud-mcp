@@ -133,10 +133,21 @@ icloud-mcp/
 - `set-mode` - Switch between LOCAL and CLOUD modes at runtime
 
 ### Email (6)
-- `list-emails` - List emails from folder
-- `read-email` - Read email content
+- `list-emails` - List emails from folder. LOCAL reads the ids of every
+  message in one Apple event, then the newest `count` through
+  `mailbox.messages.byId` (~15 ms per property). Index (`messages[i]`), range
+  and `whose` specifiers cost a scan of the whole mailbox per event in Mail.
+  Without `account`, the folder of every account is merged newest first.
+- `read-email` - Read email content. LOCAL resolves the id with
+  `mailbox.messages.byId` (Mail has no application-level `messages`, #15) and
+  reports the message's `account` and `mailbox`
 - `send-email` - Send email
-- `search-emails` - Search by criteria
+- `search-emails` - Search by criteria. LOCAL bulk-reads ids plus only the
+  filtered properties (subject, sender) and the unread ids, filters in Node,
+  then reads hits by id: `from`, `subject` and `unreadOnly` cover the whole
+  mailbox. A free-text `query` also reads the bodies of the newest 20 messages
+  per mailbox, at most 10 s in total (Mail may download a body first). The
+  result carries `scope` (per mailbox: `scanned`, `messages`, `bodyWindow`)
 - `mark-as-read` - Mark read/unread
 - `list-folders` - List mail folders
 

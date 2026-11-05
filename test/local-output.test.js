@@ -64,6 +64,14 @@ function fakeOsascript(script) {
     if (has('mailboxes') && !has('dateReceived')) {
       return JSON.stringify([{ name: 'INBOX', account: 'iCloud' }]);
     }
+    const email = {
+      id: 12345, subject: 'Hello', from: 'someone@example.com',
+      date: new Date().toISOString(), read: false, account: 'iCloud'
+    };
+    // search-emails returns the hits plus what each mailbox search covered.
+    if (has('scope')) {
+      return JSON.stringify({ items: [email], scope: [{ account: 'iCloud', mailbox: 'INBOX', scanned: 1, messages: 1, bodyWindow: 1 }] });
+    }
     return JSON.stringify([{
       id: '12345', subject: 'Hello', from: 'someone@example.com',
       date: new Date().toISOString(), read: false
