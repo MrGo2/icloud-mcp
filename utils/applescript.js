@@ -46,14 +46,23 @@ async function runAppleScript(script) {
 /**
  * Execute a JXA (JavaScript for Automation) script via stdin
  * @param {string} script - The JXA code to execute
+ * @param {Object} [options]
+ * @param {number} [options.timeoutMs] - Kill osascript and reject after this long
  * @returns {Promise<string>} - The script output
  */
-async function runJXA(script) {
+async function runJXA(script, { timeoutMs } = {}) {
   return new Promise((resolve, reject) => {
     const proc = spawn('osascript', ['-l', 'JavaScript', '-']);
 
     let stdout = '';
     let stderr = '';
+    let timer = null;
+    if (timeoutMs) {
+      timer = setTimeout(() => {
+        proc.kill();
+        reject(new AppleScriptError(`Timed out after ${Math.round(timeoutMs / 1000)}s (the app may still be busy with this request)`, script));
+      }, timeoutMs);
+    }
 
     proc.stdout.on('data', (data) => {
       stdout += data.toString();
@@ -64,6 +73,7 @@ async function runJXA(script) {
     });
 
     proc.on('close', (code) => {
+      clearTimeout(timer);
       if (code === 0) {
         resolve(stdout.trim());
       } else {
@@ -72,6 +82,7 @@ async function runJXA(script) {
     });
 
     proc.on('error', (err) => {
+      clearTimeout(timer);
       reject(new AppleScriptError(err.message, script));
     });
 

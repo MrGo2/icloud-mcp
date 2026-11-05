@@ -133,8 +133,14 @@ icloud-mcp/
 - `set-mode` - Switch between LOCAL and CLOUD modes at runtime
 
 ### Email (6)
-- `list-emails` - List emails from folder
-- `read-email` - Read email content
+- `list-emails` - List emails from folder. LOCAL reads the ids of every
+  message in one Apple event, then the newest `count` through
+  `mailbox.messages.byId` (~15 ms per property). Index (`messages[i]`), range
+  and `whose` specifiers cost a scan of the whole mailbox per event in Mail.
+  Without `account`, the folder of every account is merged newest first.
+- `read-email` - Read email content. LOCAL resolves the id with
+  `mailbox.messages.byId` (Mail has no application-level `messages`, #15) and
+  reports the message's `account` and `mailbox`
 - `send-email` - Send email
 - `search-emails` - Search by criteria
 - `mark-as-read` - Mark read/unread
@@ -243,6 +249,9 @@ carried: framing, notification handling, and unvalidated arguments.
   version and account type, and the SDK *fails* a call whose structuredContent
   does not match its schema. Note this makes `structuredContent` mandatory on
   every success path; error results (`isError: true`) are exempt.
+- **Timeouts**: `runJXA(script, { timeoutMs })` kills osascript and rejects
+  after `timeoutMs`; local Mail calls pass 90 s. The app keeps working on an
+  Apple event it already received, which is why Mail calls are also queued.
 - **Mode switching**: `set-mode` fires `notifications/tools/list_changed` via
   the listener registered in `mode.js`.
 
