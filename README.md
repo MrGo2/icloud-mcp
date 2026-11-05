@@ -56,11 +56,11 @@ Tools marked local only return an error in cloud mode, because the iCloud protoc
 
 ### Email
 
-- **list-emails**: `folder` (string, optional), `count` (number, optional, max 50)
-- **read-email**: `uid` (string), `folder` (string, optional)
+- **list-emails**: `folder` (string, optional), `account` (string, optional, local mode), `count` (number, optional, max 50)
+- **read-email**: `uid` (string), `folder` (string, optional), `account` (string, optional, local mode)
 - **send-email**: `to`, `subject`, `body` (strings); `cc`, `bcc` (strings, optional); `isHtml` (boolean, optional, cloud mode only)
 - **search-emails**: `query`, `from`, `subject`, `folder` (strings, optional), `unreadOnly` (boolean, optional), `count` (number, optional)
-- **mark-as-read**: `uid` (string), `folder` (string, optional), `isRead` (boolean, optional)
+- **mark-as-read**: `uid` (string), `folder` (string, optional), `account` (string, optional, local mode), `isRead` (boolean, optional)
 - **list-folders**: no input
 
 ### Calendar
