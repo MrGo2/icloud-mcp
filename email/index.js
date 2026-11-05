@@ -138,13 +138,27 @@ async function handleSearchEmails(args) {
   if (args.unreadOnly) criteria.unseen = true;
 
   const local = isLocalMode();
-  const raw = local
-    ? await localClient.searchEmails({ query: args.query, from: args.from, subject: args.subject, folder, count })
-    : await cloudClient.searchEmails(criteria, folder, count);
+  let raw;
+  let scope;
+  if (local) {
+    ({ items: raw, scope } = await localClient.searchEmails({
+      query: args.query,
+      from: args.from,
+      subject: args.subject,
+      folder,
+      count,
+      account: args.account,
+      unreadOnly: !!args.unreadOnly
+    }));
+  } else {
+    raw = await cloudClient.searchEmails(criteria, folder, count);
+  }
   const emails = raw.map(e => normalizeEmail(e, local));
+  const coverage = scope ? `\n\n${describeScope(scope, !!args.query)}` : '';
+  const structured = scope ? { ...listResult(emails), scope } : listResult(emails);
 
   if (emails.length === 0) {
-    return formatSuccess(`No emails found matching your search criteria in ${folder}.`, listResult([]));
+    return formatSuccess(`No emails found matching your search criteria in ${folder}.${coverage}`, structured);
   }
 
   const lines = emails.map((email, i) => {
@@ -153,7 +167,25 @@ async function handleSearchEmails(args) {
     return `${i + 1}. ${unread}${email.subject}\n   From: ${email.from}\n   Date: ${date}\n   ${local ? 'ID' : 'UID'}: ${email.ref}`;
   });
 
-  return formatSuccess(`Search results in ${folder} (${emails.length}):\n\n${lines.join('\n\n')}`, listResult(emails));
+  return formatSuccess(`Search results in ${folder} (${emails.length}):\n\n${lines.join('\n\n')}${coverage}`, structured);
+}
+
+/**
+ * One line per searched mailbox, saying what a local search covered, so a
+ * caller can tell "no match" from "not searched".
+ */
+function describeScope(scope, bodySearch) {
+  if (scope.length === 0) return 'Searched: no account has this mailbox.';
+  return 'Searched: ' + scope.map(s => {
+    if (s.error) return `${s.account}/${s.mailbox}: not searched (${s.error})`;
+    const parts = [`${s.account}/${s.mailbox}: ${s.scanned}${s.messages !== undefined ? ` of ${s.messages}` : ''} messages checked`];
+    if (bodySearch) {
+      parts.push(s.bodyWindow
+        ? `body text of the newest ${s.bodyWindow} only (other messages matched on subject)`
+        : 'body text not searched (time limit reached; matched on subject only)');
+    }
+    return parts.join(', ');
+  }).join('; ') + '.';
 }
 
 /**
@@ -233,14 +265,18 @@ const emailTools = [
   },
   {
     name: 'search-emails',
-    outputSchema: listOutput('Matching emails'),
+    outputSchema: {
+      ...listOutput('Matching emails'),
+      scope: z.array(z.looseObject({})).optional().describe('Local mode: per mailbox, how many messages were checked and how many bodies were searched')
+    },
     title: 'Search Emails',
-    description: 'Searches one mail folder (inbox by default) by free text, sender, subject and unread state; the filters combine as AND. Results carry the same summary fields as list-emails, including the ref handle that read-email and mark-as-read take.',
+    description: `Searches one mail folder (inbox by default) by free text, sender, subject and unread state; the filters combine as AND. Results carry the same summary fields as list-emails, including the ref handle that read-email and mark-as-read take. In local mode, from, subject and unreadOnly cover the whole mailbox; query matches the subject of every message but the body of only the newest ${localClient.BODY_SCAN}. The result says what was searched. Pass account to search one Mail account.`,
     inputSchema: {
       query: z.string().optional().describe('Text to search in email content'),
       from: z.string().optional().describe('Filter by sender'),
       subject: z.string().optional().describe('Filter by subject'),
       folder: z.string().optional().describe('Email folder to search (default: inbox)'),
+      account: z.string().optional().describe('Mail account name (from list-folders). Local mode only.'),
       unreadOnly: z.boolean().optional().describe('Only show unread emails'),
       count: z.number().int().min(1).max(50).optional().describe('Max results (default: 25, max: 50)')
     },
