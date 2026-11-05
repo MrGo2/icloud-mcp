@@ -6,6 +6,9 @@
 const { runAppleScript, runJXA, escapeAppleScript, escapeJXA, asInt, asBool } = require('../utils/applescript');
 const config = require('../config');
 
+// Bound each Mail script so a busy or stuck Mail cannot hang the tool call.
+const MAIL_TIMEOUT_MS = 90000;
+
 /**
  * List emails from a mailbox
  * @param {string} folder - Folder name (inbox, sent, drafts, etc.)
@@ -46,7 +49,7 @@ async function listEmails(folder = 'inbox', count = 25) {
     JSON.stringify(emails.slice(0, ${count}));
   `;
 
-  const result = await runJXA(script);
+  const result = await runJXA(script, { timeoutMs: MAIL_TIMEOUT_MS });
   return result ? JSON.parse(result) : [];
 }
 
@@ -99,7 +102,7 @@ async function readEmail(emailId, folder = 'inbox') {
     });
   `;
 
-  const result = await runJXA(script);
+  const result = await runJXA(script, { timeoutMs: MAIL_TIMEOUT_MS });
   return result ? JSON.parse(result) : null;
 }
 
@@ -189,7 +192,7 @@ async function searchEmails({ query, from, subject, folder = 'inbox', count = 25
     JSON.stringify(emails);
   `;
 
-  const result = await runJXA(script);
+  const result = await runJXA(script, { timeoutMs: MAIL_TIMEOUT_MS });
   return result ? JSON.parse(result) : [];
 }
 
@@ -208,7 +211,7 @@ async function markAsRead(emailId, isRead = true, folder = 'inbox') {
     'done';
   `;
 
-  await runJXA(script);
+  await runJXA(script, { timeoutMs: MAIL_TIMEOUT_MS });
   return { success: true, message: `Email marked as ${isRead ? 'read' : 'unread'}` };
 }
 
@@ -236,7 +239,7 @@ async function listFolders() {
     JSON.stringify(folders);
   `;
 
-  const result = await runJXA(script);
+  const result = await runJXA(script, { timeoutMs: MAIL_TIMEOUT_MS });
   return result ? JSON.parse(result) : [];
 }
 
@@ -254,7 +257,7 @@ async function deleteEmail(emailId, folder = 'inbox') {
     'deleted';
   `;
 
-  await runJXA(script);
+  await runJXA(script, { timeoutMs: MAIL_TIMEOUT_MS });
   return { success: true, message: 'Email deleted' };
 }
 
