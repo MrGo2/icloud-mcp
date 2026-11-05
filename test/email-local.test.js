@@ -183,11 +183,12 @@ const EXPLOITS = [
   '  </script>${1+1}`',
   'line\nbreak\\'
 ];
-check('account and folder values round-trip through ARGS unchanged', () => {
+check('account, folder and query values round-trip through ARGS unchanged', () => {
   for (const evil of EXPLOITS) {
     for (const script of [
       lc.buildListScript(evil, 5, evil),
-      lc.buildReadScript(5, evil, evil)
+      lc.buildReadScript(5, evil, evil),
+      lc.buildSearchScript({ query: evil, from: evil, subject: evil, folder: evil, account: evil })
     ]) {
       const m = script.match(/const ARGS = ([^\n]*);\n/);
       assert(m, 'no ARGS line');
@@ -216,9 +217,78 @@ check('without account, accounts are merged newest first', () => {
   assert(result[0].account === 'Google' && result[0].id === 40000, JSON.stringify(result[0]));
   assert(result.map(e => e.date).join() === result.map(e => e.date).sort().reverse().join(), 'not sorted');
 });
+check('search without account returns the newest hits across accounts', () => {
+  const accounts = world();
+  accounts[0].mailboxes[0].messages[5].subject = 'spotlight in iCloud';
+  const { result } = runScript(lc.buildSearchScript({ subject: 'spotlight', count: 2 }), accounts);
+  assert(result.items.length === 2 && result.scope.length === 3, JSON.stringify(result.scope));
+  assert(result.items[0].id === 97293 - 3, JSON.stringify(result.items));
+});
 check('count is clamped to 1..50', () => {
   assert(lc.buildListScript('inbox', 999).includes('"count":50'));
   assert(lc.buildListScript('inbox', 0).includes('"count":1'));
+});
+
+console.log('\nsearch-emails: whole mailbox for headers, bounded bodies, scope reported');
+check('subject search covers the whole mailbox, not 30 days', () => {
+  const { result } = runScript(lc.buildSearchScript({ subject: 'spotlight', account: 'Work', count: 25 }), world());
+  const ids = result.items.map(e => e.id);
+  assert(ids.includes(97293 - 6000), 'missed a message 6,000 deep: ' + ids);
+  assert(result.items.length === 3, ids);
+  assert(result.scope[0].scanned === BIG && result.scope[0].messages === BIG && result.scope[0].bodyWindow === 0, JSON.stringify(result.scope));
+});
+check('search stops at count and reports how far it got', () => {
+  const { result } = runScript(lc.buildSearchScript({ subject: 'spotlight', account: 'Work', count: 1 }), world());
+  assert(result.items.length === 1 && result.scope[0].scanned === 4, JSON.stringify(result.scope));
+});
+check('query matches subjects everywhere and bodies only in the newest BODY_SCAN', () => {
+  const { result, stats } = runScript(lc.buildSearchScript({ query: 'spotlight', account: 'Work', count: 25 }), world());
+  const ids = result.items.map(e => e.id);
+  assert(ids.includes(97293 - 7), 'body hit in window missed');
+  assert(!ids.includes(97293 - 40), 'body outside the window was read');
+  assert(ids.includes(97293 - 6000), 'subject hit outside the window missed');
+  assert(stats.bodies <= lc.BODY_SCAN, 'bodies read: ' + stats.bodies);
+  assert(result.scope[0].bodyWindow === lc.BODY_SCAN, JSON.stringify(result.scope));
+});
+check('body reads stop at the time budget and the scope says so', () => {
+  const script = lc.buildSearchScript({ query: 'nomatch', account: 'Work' });
+  const { mail } = fakeMail(world());
+  // Each clock read is 4 s later: the deadline is set at 4 s (budget to 14 s),
+  // bodies 0 and 1 start at 8 s and 12 s, and the check at 16 s stops.
+  let now = 0;
+  const FakeDate = Object.assign(function (...a) { return new Date(...a); }, { now: () => (now += 4000) });
+  const out = JSON.parse(vm.runInNewContext(script, { Application: () => mail, JSON, Set, Math, String, Date: FakeDate, Error }));
+  assert(out.scope[0].bodyWindow === 2, JSON.stringify(out.scope));
+});
+check('from and unread combine as AND across the whole mailbox', () => {
+  const { result } = runScript(lc.buildSearchScript({ from: 'github', unreadOnly: true, account: 'Work' }), world());
+  assert(result.items.length === 1 && result.items[0].id === 97293 - 3000, JSON.stringify(result.items));
+});
+check('unread only uses the read-status whose, no full scan', () => {
+  const { result, stats } = runScript(lc.buildSearchScript({ unreadOnly: true, account: 'Work' }), world());
+  assert(result.items.length === 2 && result.items.every(e => e.read === false));
+  assert(stats.bulk === 1 && stats.whose === 1, JSON.stringify(stats));
+});
+check('a search in a mailbox no account has returns an empty scope', () => {
+  const { result } = runScript(lc.buildSearchScript({ subject: 'x', folder: 'Nowhere' }), world());
+  assert(result.items.length === 0 && result.scope.length === 0);
+});
+check('mail arriving between bulk reads is detected, not misreported', () => {
+  const accounts = world();
+  const sig = accounts[1].mailboxes[0].messages;
+  const script = lc.buildSearchScript({ subject: 'spotlight', account: 'Work', count: 1 });
+  const { mail } = fakeMail(accounts);
+  const coll = mail.accounts.byName('Work').mailboxes.byName('INBOX').messages;
+  const realIds = coll.id;
+  let shifted = false;
+  coll.id = () => {
+    const r = realIds();
+    if (!shifted) { shifted = true; sig.unshift({ id: 99999, subject: 'new', sender: 'n', date: '2026-10-27T00:00:00Z', read: false }); }
+    return r;
+  };
+  const out = JSON.parse(vm.runInNewContext(script, { Application: () => mail, JSON, Set, Math, String, Date, Error }));
+  assert(shifted, 'test did not shift the mailbox');
+  assert(out.items.length === 1 && out.items[0].id === 97293 - 3 && /spotlight/i.test(out.items[0].subject), JSON.stringify(out.items));
 });
 
 console.log('\nmark-as-read and delete use the same lookup (fake Mail only)');

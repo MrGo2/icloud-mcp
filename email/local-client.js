@@ -9,12 +9,18 @@
  * `whose` filters cost about a second each on such a mailbox, and
  * `mailbox.messages()` followed by per-message reads costs thousands.
  *
- * So list reads message ids in one bulk event, picks ids in this process,
- * and reads details through `byId`.
+ * So every operation reads message ids in one bulk event (plus the one or two
+ * properties a search filters on), picks ids in this process, and reads
+ * details through `byId`. Bodies are read one message at a time, and Mail
+ * may fetch one from the server first (one took 35 s on a Gmail inbox), so a
+ * text query searches the newest BODY_SCAN bodies and stops reading bodies
+ * after BODY_BUDGET_MS; search reports what it covered.
  */
 
-const { runAppleScript, runJXA, escapeAppleScript, escapeJXA, asInt, asBool } = require('../utils/applescript');
+const { runAppleScript, runJXA, escapeAppleScript, asInt, asBool } = require('../utils/applescript');
 
+const BODY_SCAN = 20;
+const BODY_BUDGET_MS = 10000;
 const MAX_COUNT = 50;
 // Mail runs Apple events one at a time and keeps working on an event after
 // the client gives up, so calls are queued here and bounded in time.
@@ -180,6 +186,85 @@ function buildDeleteScript(emailId, folder = 'inbox', account = null) {
 }
 
 /**
+ * One script per search. For each account's mailbox: bulk-read ids plus the
+ * properties the filters need, match in JS, then read summaries of up to
+ * `count` hits by id. Hits from all accounts are merged newest first. A hit
+ * whose subject or sender no longer matches its bulk row means mail arrived
+ * between the bulk reads; that mailbox is read again once.
+ */
+function buildSearchScript({ query, from, subject, unreadOnly = false, folder = 'inbox', count = 25, account = null } = {}) {
+  const args = {
+    mailbox: getMailboxName(folder || 'inbox'),
+    account: account || null,
+    count: clampCount(count),
+    query: query ? String(query).toLowerCase() : '',
+    from: from ? String(from).toLowerCase() : '',
+    subject: subject ? String(subject).toLowerCase() : '',
+    unreadOnly: !!unreadOnly,
+    bodyScan: BODY_SCAN,
+    bodyBudgetMs: BODY_BUDGET_MS
+  };
+  return jxa(args, `
+    const items = [];
+    const scope = [];
+    const lc = (v) => String(v || '').toLowerCase();
+    const bodyDeadline = Date.now() + ARGS.bodyBudgetMs;
+    function scan(mb, acctName, want, s) {
+      const msgs = mb.messages;
+      const unread = ARGS.unreadOnly ? msgs.whose({ readStatus: false }).id() : null;
+      if (!ARGS.query && !ARGS.from && !ARGS.subject) {
+        s.scanned = unread.length;
+        s.bodyWindow = 0;
+        return unread.slice(0, want).map(id => summary(msgs.byId(id), acctName));
+      }
+      const ids = msgs.id();
+      const subjects = (ARGS.query || ARGS.subject) ? msgs.subject() : null;
+      const senders = ARGS.from ? msgs.sender() : null;
+      if ((subjects && subjects.length !== ids.length) || (senders && senders.length !== ids.length)) return null;
+      const unreadSet = unread ? new Set(unread) : null;
+      const hits = [];
+      let bodyEnd = Math.min(ARGS.bodyScan, ids.length);
+      let i = 0;
+      for (; i < ids.length && hits.length < want; i++) {
+        if (unreadSet && !unreadSet.has(ids[i])) continue;
+        const subj = subjects ? lc(subjects[i]) : '';
+        if (ARGS.from && lc(senders[i]).indexOf(ARGS.from) === -1) continue;
+        if (ARGS.subject && subj.indexOf(ARGS.subject) === -1) continue;
+        if (ARGS.query && subj.indexOf(ARGS.query) === -1) {
+          if (i >= bodyEnd) continue;
+          if (Date.now() > bodyDeadline) { bodyEnd = i; continue; }
+          if (lc(msgs.byId(ids[i]).content()).indexOf(ARGS.query) === -1) continue;
+        }
+        hits.push(i);
+      }
+      s.messages = ids.length;
+      s.scanned = i;
+      s.bodyWindow = ARGS.query ? bodyEnd : 0;
+      const out = [];
+      for (const i of hits) {
+        const e = summary(msgs.byId(ids[i]), acctName);
+        if (subjects && lc(e.subject) !== lc(subjects[i])) return null;
+        if (senders && lc(e.from) !== lc(senders[i])) return null;
+        out.push(e);
+      }
+      return out;
+    }
+    for (const acct of accountsFor(ARGS.account)) {
+      const mb = mailboxIn(acct, ARGS.mailbox);
+      if (!mb) continue;
+      const acctName = acct.name();
+      const s = { account: acctName, mailbox: ARGS.mailbox, scanned: 0 };
+      let found = scan(mb, acctName, ARGS.count, s);
+      if (found === null) found = scan(mb, acctName, ARGS.count, s);
+      if (found === null) throw new Error('Mailbox ' + acctName + '/' + ARGS.mailbox + ' kept changing during the search; try again');
+      items.push(...found);
+      scope.push(s);
+    }
+    return { items: newestFirst(items, ARGS.count), scope: scope };
+  `);
+}
+
+/**
  * Send an email
  * @param {Object} options - Email options
  * @returns {Promise<Object>} - Send result
@@ -274,49 +359,10 @@ async function readEmail(emailId, folder = 'inbox', account = null) {
 /**
  * Search emails
  * @param {Object} options - Search options
- * @returns {Promise<Array>} - Matching emails
+ * @returns {Promise<{items: Array, scope: Array}>} - Matching emails and what was searched
  */
-async function searchEmails({ query, from, subject, folder = 'inbox', count = 25 }) {
-  const mailboxName = getMailboxName(folder);
-
-  let conditions = [];
-  if (query) conditions.push(`(msg.subject().toLowerCase().includes("${escapeJXA(query.toLowerCase())}") || msg.content().toLowerCase().includes("${escapeJXA(query.toLowerCase())}"))`);
-  if (from) conditions.push(`msg.sender().toLowerCase().includes("${escapeJXA(from.toLowerCase())}")`);
-  if (subject) conditions.push(`msg.subject().toLowerCase().includes("${escapeJXA(subject.toLowerCase())}")`);
-
-  const filterCondition = conditions.length > 0 ? conditions.join(' && ') : 'true';
-
-  const script = `
-    const mail = Application('Mail');
-    const accounts = mail.accounts();
-    let emails = [];
-
-    for (let account of accounts) {
-      try {
-        const mailbox = account.mailboxes.byName('${escapeJXA(mailboxName)}');
-        const messages = mailbox.messages();
-
-        for (let i = 0; i < messages.length && emails.length < ${asInt(count, 25)}; i++) {
-          const msg = messages[i];
-          if (${filterCondition}) {
-            emails.push({
-              id: msg.id(),
-              subject: msg.subject(),
-              from: msg.sender(),
-              date: msg.dateReceived().toISOString(),
-              read: msg.readStatus(),
-              account: account.name()
-            });
-          }
-        }
-      } catch (e) {}
-    }
-
-    JSON.stringify(emails);
-  `;
-
-  const result = await runMail(script);
-  return result ? JSON.parse(result) : [];
+async function searchEmails({ query, from, subject, unreadOnly, folder = 'inbox', count = 25, account = null } = {}) {
+  return runMailJSON(buildSearchScript({ query, from, subject, unreadOnly, folder, count, account }));
 }
 
 /**
@@ -382,6 +428,9 @@ module.exports = {
   deleteEmail,
   buildListScript,
   buildReadScript,
+  buildSearchScript,
   buildMarkAsReadScript,
-  buildDeleteScript
+  buildDeleteScript,
+  BODY_SCAN,
+  BODY_BUDGET_MS
 };
