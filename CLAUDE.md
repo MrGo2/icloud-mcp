@@ -249,6 +249,9 @@ carried: framing, notification handling, and unvalidated arguments.
   version and account type, and the SDK *fails* a call whose structuredContent
   does not match its schema. Note this makes `structuredContent` mandatory on
   every success path; error results (`isError: true`) are exempt.
+- **Timeouts**: `runJXA(script, { timeoutMs })` kills osascript and rejects
+  after `timeoutMs`; local Mail calls pass 90 s. The app keeps working on an
+  Apple event it already received, which is why Mail calls are also queued.
 - **Mode switching**: `set-mode` fires `notifications/tools/list_changed` via
   the listener registered in `mode.js`.
 
