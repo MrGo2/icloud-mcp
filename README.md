@@ -254,6 +254,7 @@ Call `about` for the active mode and service list, and `check-auth-status` to co
 | `USE_LOCAL_MODE` | `true` | `false` selects cloud mode |
 | `ICLOUD_EMAIL` | (unset) | iCloud address, cloud mode only |
 | `ICLOUD_APP_PASSWORD` | (unset) | App-specific password, cloud mode only |
+| `ICLOUD_LOCALE` | `es-ES` | BCP 47 locale for formatted dates and relative days, e.g. `en-US` |
 | `ICLOUD_MCP_IMSG_PATH` | (unset) | Explicit path to the `imsg` binary |
 
 Read from the environment, or from a `.env` file beside the module. See `.env.example`.

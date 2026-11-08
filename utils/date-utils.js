@@ -5,7 +5,7 @@
 const config = require('../config');
 
 /**
- * Format date for display (Spanish locale by default)
+ * Format date for display (ICLOUD_LOCALE, Spanish by default)
  */
 function formatDate(date, options = {}) {
   const d = date instanceof Date ? date : new Date(date);
@@ -56,9 +56,12 @@ function formatRelative(date) {
   const now = new Date();
   const diff = Math.floor((now - d) / (1000 * 60 * 60 * 24));
 
-  if (diff === 0) return 'Hoy';
-  if (diff === 1) return 'Ayer';
-  if (diff < 7) return `Hace ${diff} días`;
+  if (diff >= 0 && diff < 7) {
+    // Worded in the configured locale ("Hoy" for es-ES, "Today" for en-US).
+    const rel = new Intl.RelativeTimeFormat(config.DEFAULTS.DATE_FORMAT, { numeric: 'auto' })
+      .format(-diff, 'day');
+    return rel.charAt(0).toUpperCase() + rel.slice(1);
+  }
 
   return formatDate(d, { hour: undefined, minute: undefined });
 }
