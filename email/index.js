@@ -35,9 +35,10 @@ async function handleListEmails(args) {
   const count = Math.min(args.count || 25, config.DEFAULTS.MAX_RESULTS);
 
   const local = isLocalMode();
-  const client = local ? localClient : cloudClient;
-
-  const emails = (await client.listEmails(folder, count)).map(e => normalizeEmail(e, local));
+  const emails = (local
+    ? await localClient.listEmails(folder, count, args.account)
+    : await cloudClient.listEmails(folder, count)
+  ).map(e => normalizeEmail(e, local));
 
   if (emails.length === 0) {
     return formatSuccess(`No emails found in ${folder}.`, listResult([]));
@@ -64,7 +65,7 @@ async function handleReadEmail(args) {
   const local = isLocalMode();
 
   const email = local
-    ? await localClient.readEmail(args.uid, folder)
+    ? await localClient.readEmail(args.uid, folder, args.account)
     : await cloudClient.readEmail(args.uid, folder);
 
   // Mail.app returns the body as `body`; mailparser returns `text`.
@@ -80,8 +81,8 @@ async function handleReadEmail(args) {
 
   return formatSuccess(
     `Subject: ${email.subject}
-From: ${email.from}
-To: ${email.to}${email.cc ? `\nCC: ${email.cc}` : ''}
+From: ${email.from}${email.account ? `\nAccount: ${email.account}` : ''}
+To: ${email.to}${email.cc && email.cc.length ? `\nCC: ${email.cc}` : ''}
 Date: ${formatDate(email.date)}
 ${local ? 'ID' : 'UID'}: ${email.uid || email.id}
 
@@ -167,7 +168,7 @@ async function handleMarkAsRead(args) {
   const isRead = args.isRead !== false;
 
   if (isLocalMode()) {
-    await localClient.markAsRead(args.uid, isRead, folder);
+    await localClient.markAsRead(args.uid, isRead, folder, args.account);
   } else {
     await cloudClient.markAsRead(args.uid, folder, isRead);
   }
@@ -183,7 +184,7 @@ async function handleListFolders() {
     ? await localClient.listFolders()
     : await cloudClient.listFolders();
 
-  const lines = folders.map(f => `- ${f.name}`);
+  const lines = folders.map(f => `- ${f.name}${f.account ? ` (${f.account})` : ''}`);
 
   return formatSuccess(`Email folders:\n\n${lines.join('\n')}`, listResult(folders));
 }
@@ -194,9 +195,10 @@ const emailTools = [
     name: 'list-emails',
     outputSchema: listOutput('Emails'),
     title: 'List Emails',
-    description: 'Lists emails from a folder (default: inbox)',
+    description: 'Lists the newest emails in a folder (default: inbox). In local mode, the mailbox of that name in every account is merged newest first; pass account to list one Mail account.',
     inputSchema: {
       folder: z.string().optional().describe('Email folder (inbox, sent, drafts, trash, archive, junk)'),
+      account: z.string().optional().describe('Mail account name (from list-folders). Local mode only; omit to merge all accounts.'),
       count: z.number().int().min(1).max(50).optional().describe('Number of emails to retrieve (default: 25, max: 50)')
     },
     annotations: {"readOnlyHint":true,"idempotentHint":true,"openWorldHint":true},
@@ -205,10 +207,11 @@ const emailTools = [
   {
     name: 'read-email',
     title: 'Read Email',
-    description: 'Reads the full content of an email by UID',
+    description: 'Reads the full content of an email by UID (the ref from list-emails or search-emails).',
     inputSchema: {
       uid: z.string().describe('Email handle: the UID from list-emails in cloud mode, or the message ID in local mode'),
-      folder: z.string().optional().describe('Email folder (default: inbox)')
+      folder: z.string().optional().describe('Email folder (default: inbox)'),
+      account: z.string().optional().describe('Mail account name. Local mode only; optional, the message ID is unique across accounts.')
     },
     annotations: {"readOnlyHint":true,"idempotentHint":true,"openWorldHint":true},
     handler: withErrorHandler(handleReadEmail, 'read-email')
@@ -251,6 +254,7 @@ const emailTools = [
     inputSchema: {
       uid: z.string().describe('Email handle: the UID from list-emails in cloud mode, or the message ID in local mode'),
       folder: z.string().optional().describe('Email folder (default: inbox)'),
+      account: z.string().optional().describe('Mail account name. Local mode only.'),
       isRead: z.boolean().optional().describe('Mark as read (true) or unread (false). Default: true')
     },
     annotations: {"readOnlyHint":false,"destructiveHint":false,"idempotentHint":true,"openWorldHint":true},
