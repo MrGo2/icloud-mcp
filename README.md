@@ -56,11 +56,11 @@ Tools marked local only return an error in cloud mode, because the iCloud protoc
 
 ### Email
 
-- **list-emails**: `folder` (string, optional), `count` (number, optional, max 50)
-- **read-email**: `uid` (string), `folder` (string, optional)
+- **list-emails**: `folder` (string, optional), `account` (string, optional, local mode), `count` (number, optional, max 50)
+- **read-email**: `uid` (string), `folder` (string, optional), `account` (string, optional, local mode)
 - **send-email**: `to`, `subject`, `body` (strings); `cc`, `bcc` (strings, optional); `isHtml` (boolean, optional, cloud mode only)
-- **search-emails**: `query`, `from`, `subject`, `folder` (strings, optional), `unreadOnly` (boolean, optional), `count` (number, optional)
-- **mark-as-read**: `uid` (string), `folder` (string, optional), `isRead` (boolean, optional)
+- **search-emails**: `query`, `from`, `subject`, `folder`, `account` (strings, optional; `account` is local mode), `unreadOnly` (boolean, optional), `count` (number, optional)
+- **mark-as-read**: `uid` (string), `folder` (string, optional), `account` (string, optional, local mode), `isRead` (boolean, optional)
 - **list-folders**: no input
 
 ### Calendar
@@ -216,7 +216,7 @@ The server otherwise looks in `ICLOUD_MCP_IMSG_PATH`, `IMSG_PATH`, both Homebrew
 
 ### Known limitation: large mailboxes
 
-Mail.app tools iterate messages through AppleScript, which is slow on very large mailboxes and can exceed the Apple Event timeout before returning. Narrow the request with `folder` and a smaller `count`, or use cloud mode, where IMAP does the filtering server-side. This is a property of the AppleScript bridge, not something the server can work around.
+Local mode reads one property of every message in a single Apple event (about a second for 7,000 messages) and fetches details only for the messages it returns. `list-emails` and the `from`, `subject` and `unreadOnly` filters of `search-emails` therefore cover the whole mailbox. A free-text `query` matches every subject but reads the body of only the newest 20 messages; each search result says what it covered. Pass `account` (shown by `list-folders`) to skip other accounts; an account Mail cannot read is skipped and named in the result. Mail runs one request at a time, so the server queues its own Mail calls. Use cloud mode for full-text search of message bodies.
 
 ### Calendar access (local mode)
 
