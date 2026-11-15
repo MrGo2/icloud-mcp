@@ -12,6 +12,7 @@
 [![Node](https://img.shields.io/badge/node-%E2%89%A520-brightgreen?style=flat-square&logo=node.js&logoColor=white)](package.json)
 [![MCP](https://img.shields.io/badge/MCP-SDK%20v2-a371f7?style=flat-square)](https://modelcontextprotocol.io)
 [![icloud-mcp MCP server](https://glama.ai/mcp/servers/MrGo2/icloud-mcp/badges/score.svg)](https://glama.ai/mcp/servers/MrGo2/icloud-mcp)
+[![Listed on PlugMCP](https://plugmcp.ai/api/badge/mrgo2-icloud-mcp.svg)](https://plugmcp.ai/mcp/mrgo2-icloud-mcp)
 
 </div>
 
