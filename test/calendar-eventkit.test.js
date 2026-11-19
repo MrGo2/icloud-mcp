@@ -24,13 +24,28 @@ const now = Date.now();
 // EKEvents in the store, deliberately unsorted. The recurring one appears as
 // three occurrences sharing the series id, as EventKit expands them.
 let EK_EVENTS = [];
+const NIL = { isNil: () => true };
+// EKRecurrenceRule fakes: frequency 0 daily, 1 weekly, 2 monthly, 3 yearly;
+// dayOfTheWeek 1 = Sunday; nil arrays are NIL, as the bridge returns them.
+function ekRule({ frequency, interval = 1, days = null, monthDays = null, months = null, end = NIL, wkst = 0 }) {
+  return {
+    frequency, interval, firstDayOfTheWeek: wkst,
+    daysOfTheWeek: days ? nsArray(days.map(([dayOfTheWeek, weekNumber]) => ({ dayOfTheWeek, weekNumber }))) : NIL,
+    daysOfTheMonth: monthDays ? nsArray(monthDays) : NIL,
+    monthsOfTheYear: months ? nsArray(months) : NIL,
+    weeksOfTheYear: NIL, daysOfTheYear: NIL, setPositions: NIL,
+    recurrenceEnd: end
+  };
+}
+const WEEKLY_MONDAY = ekRule({ frequency: 1, days: [[2, 0]] });
+
 function resetStore() {
   EK_EVENTS = [
     { id: 'C', title: 'Third', start: now + 3 * DAY, cal: 'Work', location: 'Room 1' },
-    { id: 'A', title: 'First', start: now + 1 * DAY, cal: 'Home' },
-    { id: 'R', title: 'Weekly', start: now + 2 * DAY, cal: 'Home' },
-    { id: 'R', title: 'Weekly', start: now + 9 * DAY, cal: 'Home' },
-    { id: 'R', title: 'Weekly', start: now + 16 * DAY, cal: 'Home' },
+    { id: 'A', title: 'First', start: now + 1 * DAY, cal: 'Home', allDay: true },
+    { id: 'R', title: 'Weekly', start: now + 2 * DAY, cal: 'Home', rule: WEEKLY_MONDAY },
+    { id: 'R', title: 'Weekly', start: now + 9 * DAY, cal: 'Home', rule: WEEKLY_MONDAY },
+    { id: 'R', title: 'Weekly', start: now + 16 * DAY, cal: 'Home', rule: WEEKLY_MONDAY },
     { id: 'P', title: 'In progress', start: now - DAY / 24, cal: 'Work' }
   ];
 }
@@ -46,7 +61,7 @@ function nsDate(ms) {
   return { timeIntervalSince1970: String(ms / 1000), isNil: () => false };
 }
 function nsArray(items) {
-  return { count: items.length, objectAtIndex: (i) => items[i] };
+  return { count: items.length, objectAtIndex: (i) => items[i], isNil: () => false };
 }
 function fakeDollar() {
   const store = {
@@ -60,7 +75,10 @@ function fakeDollar() {
       location: ev.location,
       startDate: nsDate(ev.start),
       endDate: nsDate(ev.start + 3600 * 1000),
-      calendar: { title: ev.cal }
+      calendar: { title: ev.cal },
+      allDay: ev.allDay === true,
+      hasRecurrenceRules: !!ev.rule,
+      recurrenceRules: ev.rule ? nsArray([ev.rule]) : NIL
     })))
   };
   return Object.assign(() => undefined, {
@@ -118,7 +136,7 @@ async function run(count, days) {
   finally { console.error = realError; }
 }
 const calendarAppCalls = () => scripts.filter(s => s.includes("Application('Calendar')")).length;
-const KEYS = 'calendar,endDate,id,location,startDate,summary';
+const KEYS = 'allDay,calendar,endDate,id,location,recurrence,startDate,summary';
 
 (async () => {
   console.log('\nLOCAL list-events via EventKit');
@@ -166,6 +184,39 @@ const KEYS = 'calendar,endDate,id,location,startDate,summary';
     setEventKit(3);
     const r = await run(25, 30);
     assert(r.filter(e => e.id === 'R').length === 3);
+  });
+
+  await check('recurrence comes back as an RRULE on every occurrence; others are null', async () => {
+    setEventKit(3);
+    const r = await run(25, 30);
+    const weekly = r.filter(e => e.id === 'R');
+    assert(weekly.length === 3 && weekly.every(e => e.recurrence === 'FREQ=WEEKLY;BYDAY=MO'), JSON.stringify(weekly[0]));
+    assert(r.filter(e => e.id !== 'R').every(e => e.recurrence === null), 'non-recurring event has a rule');
+  });
+
+  await check('allDay is reported', async () => {
+    setEventKit(3);
+    const r = await run(25, 30);
+    assert(r.find(e => e.id === 'A').allDay === true && r.find(e => e.id === 'C').allDay === false);
+  });
+
+  await check('rules with interval, positions, month days, UNTIL, COUNT and WKST round-trip', async () => {
+    setEventKit(3);
+    const until = Date.UTC(2027, 11, 31, 23, 59, 59);
+    const cases = [
+      [ekRule({ frequency: 2, interval: 2, days: [[6, -1]], end: { isNil: () => false, endDate: nsDate(until), occurrenceCount: 0 } }),
+        'FREQ=MONTHLY;INTERVAL=2;BYDAY=-1FR;UNTIL=20271231T235959Z'],
+      [ekRule({ frequency: 3, months: [12], monthDays: [25], end: { isNil: () => false, endDate: NIL, occurrenceCount: 5 } }),
+        'FREQ=YEARLY;BYMONTHDAY=25;BYMONTH=12;COUNT=5'],
+      [ekRule({ frequency: 0, wkst: 2 }), 'FREQ=DAILY;WKST=MO'],
+      [ekRule({ frequency: 9 }), null]
+    ];
+    for (const [rule, expected] of cases) {
+      EK_EVENTS = [{ id: 'X', title: 'Rule', start: now + DAY, cal: 'Home', rule }];
+      const r = await run(25, 30);
+      assert(r[0].recurrence === expected, 'got ' + r[0].recurrence + ', want ' + expected);
+    }
+    resetStore();
   });
 
   await check('denied (2): falls back to Calendar.app and says so on stderr', async () => {

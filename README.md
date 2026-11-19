@@ -66,9 +66,9 @@ Tools marked local only return an error in cloud mode, because the iCloud protoc
 
 ### Calendar
 
-- **list-events**: `count` (number, optional, max 50), `daysAhead` (number, optional)
-- **create-event**: `summary`, `start`, `end` (strings, ISO 8601); `description`, `location` (optional); `calendarUrl` (cloud) or `calendarName` (local)
-- **update-event**: `eventUrl` (string); any of `summary`, `start`, `end`, `description`, `location`. Only the fields you pass change
+- **list-events**: `count` (number, optional, max 50), `daysAhead` (number, optional). Each event reports `isAllDay` and, when it repeats, `recurrence` (an RRULE such as `FREQ=WEEKLY;BYDAY=MO`)
+- **create-event**: `summary`, `start`, `end` (strings, ISO 8601); `description`, `location` (optional); `allDay` (boolean, optional); `recurrence` (string, optional); `calendarUrl` (cloud) or `calendarName` (local)
+- **update-event**: `eventUrl` (string); any of `summary`, `start`, `end`, `description`, `location`, `allDay`, `recurrence`. Only the fields you pass change; `recurrence: ""` turns a series back into a single event
 - **delete-event**: `eventUrl` (string)
 - **list-calendars**: no input
 
@@ -226,6 +226,23 @@ Mail.app tools iterate messages through AppleScript, which is slow on very large
 If that access is denied, restricted or left unanswered, `list-events` falls back to the old Calendar.app query and logs `EventKit unavailable` on stderr. That path still filters the window inside Calendar.app with a `whose` query, but on accounts with many calendars, especially subscribed ones carrying years of events (holidays, sports fixtures, travel feeds), it can exceed any reasonable timeout. In that case grant Calendars access, or use cloud mode, where CalDAV filters server-side (see [#11](https://github.com/MrGo2/icloud-mcp/issues/11)).
 
 Through EventKit, a recurring event appears once per occurrence in the window, and every occurrence carries the series id. Passing that id to `update-event` or `delete-event` in local mode changes or deletes the whole series.
+
+### Recurring and all-day events
+
+`create-event` and `update-event` take an optional `recurrence`: an [RFC 5545](https://www.rfc-editor.org/rfc/rfc5545#section-3.3.10) RRULE without the `RRULE:` prefix.
+
+| Rule | Meaning |
+|---|---|
+| `FREQ=YEARLY` | Every year on the start date (birthdays, anniversaries) |
+| `FREQ=WEEKLY;BYDAY=MO` | Every Monday |
+| `FREQ=MONTHLY;COUNT=12` | Monthly, twelve times |
+| `FREQ=MONTHLY;BYDAY=-1FR;UNTIL=20271231T235959Z` | Last Friday of each month until the end of 2027 |
+
+The rule must start with `FREQ=` and use only RRULE parts (`INTERVAL`, `COUNT`, `UNTIL`, `BYDAY`, `BYMONTH`, `BYMONTHDAY`…). Anything else is rejected before it reaches Calendar.app or iCloud. On `update-event`, an empty string removes the recurrence. In cloud mode that also drops `EXDATE`, `RDATE` and any moved or edited occurrences, as Calendar does when you set Repeat to None.
+
+`allDay: true` makes an all-day event. Pass dates as `YYYY-MM-DD`. As in iCalendar the end is exclusive, so a one-day event on 25 December runs `2026-12-25` to `2026-12-26`; an end on or before the start also means one day. In cloud mode, an all-day event keeps its all-day dates when you change only `start` or `end`, and switching `allDay` needs `start` and `end` in the same call.
+
+`list-events` reports the rule as `recurrence` and the all-day flag as `isAllDay`. Only EventKit expands a series into its occurrences. The Calendar.app fallback and cloud mode return the series itself, with its first start date.
 
 ### App-specific password (cloud mode)
 

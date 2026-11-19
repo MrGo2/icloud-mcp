@@ -101,6 +101,7 @@ icloud-mcp/
 ├── calendar/             # Calendar module
 │   ├── caldav-client.js  # Cloud: CalDAV
 │   ├── local-client.js   # Local: Calendar.app
+│   ├── recurrence.js     # RRULE validation, all-day dates
 │   └── index.js
 ├── contacts/             # Contacts module
 │   ├── carddav-client.js # Cloud: CardDAV
@@ -149,9 +150,18 @@ icloud-mcp/
   `calendarItemIdentifier`, which equals Calendar.app's `uid`. Recurring events
   come back once per occurrence, all sharing the series id, so local
   `update-event`/`delete-event` on such an id act on the whole series.
+  Each event carries `isAllDay` and, when it repeats, `recurrence` (RRULE). EventKit
+  has no RRULE accessor, so the JXA script rebuilds one from `EKRecurrenceRule`.
 - `list-calendars` - List calendars
-- `create-event` - Create event
-- `update-event` - Update event (cloud/CalDAV; preserves RRULE, attendees, alarms)
+- `create-event` - Create event. Optional `allDay` and `recurrence` (RFC 5545
+  RRULE without the `RRULE:` prefix, e.g. `FREQ=YEARLY`)
+- `update-event` - Update event (cloud/CalDAV; preserves RRULE, attendees, alarms).
+  `recurrence` sets the rule; `""` removes it (cloud also drops EXDATE, RDATE and
+  overrides). The CalDAV merge edits only the master VEVENT's own properties, so
+  VTIMEZONE and VALARM lines are never rewritten. `calendar/recurrence.js`
+  validates every rule part by part (FREQ first, known parts, value grammar)
+  before it reaches AppleScript or iCalendar; the zod schema already limits it
+  to the RRULE alphabet.
 - `delete-event` - Delete event
 
 ### Contacts (7)

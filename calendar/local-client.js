@@ -3,7 +3,8 @@
  * Accesses Calendar.app via AppleScript
  */
 
-const { runAppleScript, runJXA, escapeAppleScript, escapeJXA, asInt, appleScriptDateStmts } = require('../utils/applescript');
+const { runAppleScript, runJXA, escapeAppleScript, escapeJXA, asInt, asBool, appleScriptDateStmts } = require('../utils/applescript');
+const { normalizeRecurrence, parseEventDate, allDayRange } = require('./recurrence');
 const config = require('../config');
 
 // EKAuthorizationStatus: 0 notDetermined, 1 restricted, 2 denied, 3 fullAccess, 4 writeOnly
@@ -79,6 +80,44 @@ function eventKitScript(now, future, request) {
       const rangeEnd = new Date(${JSON.stringify(future.toISOString())});
       const nsDate = (d) => $.NSDate.dateWithTimeIntervalSince1970(d.getTime() / 1000);
       const toDate = (ns) => ns && !ns.isNil() ? new Date(Number(ns.timeIntervalSince1970) * 1000) : null;
+      // EKRecurrenceRule has no RRULE accessor, so rebuild one from its fields.
+      const FREQ = ['DAILY', 'WEEKLY', 'MONTHLY', 'YEARLY'];
+      const WEEKDAY = ['', 'SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
+      const list = (arr, f) => {
+        const out = [];
+        if (arr && !arr.isNil()) for (let k = 0; k < arr.count; k++) out.push(f(arr.objectAtIndex(k)));
+        return out;
+      };
+      const num = (n) => Number(ObjC.unwrap(n));
+      const icalUTC = (d) => d.toISOString().split('.')[0].split('-').join('').split(':').join('') + 'Z';
+      const rruleOf = (rule) => {
+        const freq = FREQ[Number(rule.frequency)];
+        if (!freq) return null;
+        const parts = ['FREQ=' + freq];
+        const interval = Number(rule.interval);
+        if (interval > 1) parts.push('INTERVAL=' + interval);
+        const days = list(rule.daysOfTheWeek, (d) => (Number(d.weekNumber) || '') + WEEKDAY[Number(d.dayOfTheWeek)]);
+        if (days.length) parts.push('BYDAY=' + days.join(','));
+        [['BYMONTHDAY', rule.daysOfTheMonth], ['BYMONTH', rule.monthsOfTheYear], ['BYWEEKNO', rule.weeksOfTheYear],
+          ['BYYEARDAY', rule.daysOfTheYear], ['BYSETPOS', rule.setPositions]].forEach(([key, arr]) => {
+          const values = list(arr, num);
+          if (values.length) parts.push(key + '=' + values.join(','));
+        });
+        const end = rule.recurrenceEnd;
+        if (end && !end.isNil()) {
+          const until = toDate(end.endDate);
+          if (until) parts.push('UNTIL=' + icalUTC(until));
+          else if (Number(end.occurrenceCount) > 0) parts.push('COUNT=' + Number(end.occurrenceCount));
+        }
+        const wkst = Number(rule.firstDayOfTheWeek);
+        if (wkst > 0 && WEEKDAY[wkst]) parts.push('WKST=' + WEEKDAY[wkst]);
+        return parts.join(';');
+      };
+      const recurrenceOf = (ev) => {
+        if (!ev.hasRecurrenceRules) return null;
+        const rules = list(ev.recurrenceRules, rruleOf).filter(Boolean);
+        return rules.length ? rules[0] : null;
+      };
       const pred = store.predicateForEventsWithStartDateEndDateCalendars(nsDate(rangeStart), nsDate(rangeEnd), $());
       const evs = store.eventsMatchingPredicate(pred);
       events = [];
@@ -94,7 +133,9 @@ function eventKitScript(now, future, request) {
           startDate: start.toISOString(),
           endDate: end ? end.toISOString() : null,
           location: ObjC.unwrap(ev.location) || '',
-          calendar: ObjC.unwrap(ev.calendar.title)
+          calendar: ObjC.unwrap(ev.calendar.title),
+          allDay: ev.allDay === true,
+          recurrence: recurrenceOf(ev)
         });
       }
     }
@@ -141,6 +182,10 @@ async function listEventsAppleScript(count, now, future) {
         const starts = evts.startDate();
         const ends = evts.endDate();
         const locations = evts.location();
+        // Optional extras: a calendar that cannot report them still lists.
+        let alldays = [], recurrences = [];
+        try { alldays = evts.alldayEvent(); } catch (e) {}
+        try { recurrences = evts.recurrence(); } catch (e) {}
 
         for (let j = 0; j < uids.length; j++) {
           const start = starts[j];
@@ -153,7 +198,9 @@ async function listEventsAppleScript(count, now, future) {
             startDate: start.toISOString(),
             endDate: ends[j] ? ends[j].toISOString() : null,
             location: locations[j] || '',
-            calendar: calNames[i]
+            calendar: calNames[i],
+            allDay: alldays[j] === true,
+            recurrence: recurrences[j] || null
           });
         }
       } catch (e) {
@@ -202,11 +249,20 @@ async function listCalendars() {
 /**
  * Create a new event
  * @param {Object} options - Event options
+ * @param {boolean} [options.allDay] - All-day event; end is exclusive (see allDayRange)
+ * @param {string} [options.recurrence] - RFC 5545 RRULE, e.g. FREQ=YEARLY
  * @returns {Promise<Object>} - Created event info
  */
-async function createEvent({ summary, start, end, location, description, calendarName, allDay = false }) {
-  const startDate = new Date(start);
-  const endDate = new Date(end);
+async function createEvent({ summary, start, end, location, description, calendarName, allDay = false, recurrence }) {
+  const isAllDay = asBool(allDay);
+  const rule = normalizeRecurrence(recurrence);
+  let startDate, endDate;
+  if (isAllDay) {
+    ({ startDay: startDate, endDay: endDate } = allDayRange(start, end));
+  } else {
+    startDate = parseEventDate(start);
+    endDate = parseEventDate(end);
+  }
 
   // Use default calendar if none specified
   const targetCalendar = calendarName || 'Calendar';
@@ -216,9 +272,10 @@ async function createEvent({ summary, start, end, location, description, calenda
         ${appleScriptDateStmts('newStart', startDate)}
         ${appleScriptDateStmts('newEnd', endDate)}
         tell calendar "${escapeAppleScript(targetCalendar)}"
-          set newEvent to make new event with properties {summary:"${escapeAppleScript(summary)}", start date:newStart, end date:newEnd${allDay ? ', allday event:true' : ''}}
+          set newEvent to make new event with properties {summary:"${escapeAppleScript(summary)}", start date:newStart, end date:newEnd${isAllDay ? ', allday event:true' : ''}}
           ${location ? `set location of newEvent to "${escapeAppleScript(location)}"` : ''}
           ${description ? `set description of newEvent to "${escapeAppleScript(description)}"` : ''}
+          ${rule ? `set recurrence of newEvent to "${escapeAppleScript(rule)}"` : ''}
           return uid of newEvent
         end tell
       end tell
@@ -231,21 +288,32 @@ async function createEvent({ summary, start, end, location, description, calenda
 /**
  * Update an existing event
  * @param {string} eventId - Event UID
- * @param {Object} updates - Fields to update
+ * @param {Object} updates - Fields to update; recurrence '' removes the rule
  * @returns {Promise<Object>} - Result
  */
-async function updateEvent(eventId, { summary, start, end, location, description }) {
+async function updateEvent(eventId, { summary, start, end, location, description, allDay, recurrence }) {
   let updateCommands = [];
   let dateSetup = [];
 
+  // allDay first: Calendar.app reinterprets the dates when the flag flips.
+  if (allDay !== undefined) updateCommands.push(`set allday event of theEvent to ${asBool(allDay) ? 'true' : 'false'}`);
   if (summary) updateCommands.push(`set summary of theEvent to "${escapeAppleScript(summary)}"`);
-  if (start) {
-    dateSetup.push(appleScriptDateStmts('newStart', new Date(start)));
+  let startDate = start ? parseEventDate(start) : null;
+  let endDate = end ? parseEventDate(end) : null;
+  if (start && end && allDay !== undefined && asBool(allDay)) {
+    ({ startDay: startDate, endDay: endDate } = allDayRange(start, end));
+  }
+  if (startDate) {
+    dateSetup.push(appleScriptDateStmts('newStart', startDate));
     updateCommands.push('set start date of theEvent to newStart');
   }
-  if (end) {
-    dateSetup.push(appleScriptDateStmts('newEnd', new Date(end)));
+  if (endDate) {
+    dateSetup.push(appleScriptDateStmts('newEnd', endDate));
     updateCommands.push('set end date of theEvent to newEnd');
+  }
+  if (recurrence !== undefined) {
+    // An empty rule turns a recurring event back into a single one.
+    updateCommands.push(`set recurrence of theEvent to "${escapeAppleScript(normalizeRecurrence(recurrence))}"`);
   }
   if (location !== undefined) updateCommands.push(`set location of theEvent to "${escapeAppleScript(location || '')}"`);
   if (description !== undefined) updateCommands.push(`set description of theEvent to "${escapeAppleScript(description || '')}"`);
