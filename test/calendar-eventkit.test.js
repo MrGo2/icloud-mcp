@@ -24,13 +24,28 @@ const now = Date.now();
 // EKEvents in the store, deliberately unsorted. The recurring one appears as
 // three occurrences sharing the series id, as EventKit expands them.
 let EK_EVENTS = [];
+const NIL = { isNil: () => true };
+// EKRecurrenceRule fakes: frequency 0 daily, 1 weekly, 2 monthly, 3 yearly;
+// dayOfTheWeek 1 = Sunday; nil arrays are NIL, as the bridge returns them.
+function ekRule({ frequency, interval = 1, days = null, monthDays = null, months = null, end = NIL, wkst = 0 }) {
+  return {
+    frequency, interval, firstDayOfTheWeek: wkst,
+    daysOfTheWeek: days ? nsArray(days.map(([dayOfTheWeek, weekNumber]) => ({ dayOfTheWeek, weekNumber }))) : NIL,
+    daysOfTheMonth: monthDays ? nsArray(monthDays) : NIL,
+    monthsOfTheYear: months ? nsArray(months) : NIL,
+    weeksOfTheYear: NIL, daysOfTheYear: NIL, setPositions: NIL,
+    recurrenceEnd: end
+  };
+}
+const WEEKLY_MONDAY = ekRule({ frequency: 1, days: [[2, 0]] });
+
 function resetStore() {
   EK_EVENTS = [
     { id: 'C', title: 'Third', start: now + 3 * DAY, cal: 'Work', location: 'Room 1' },
-    { id: 'A', title: 'First', start: now + 1 * DAY, cal: 'Home' },
-    { id: 'R', title: 'Weekly', start: now + 2 * DAY, cal: 'Home' },
-    { id: 'R', title: 'Weekly', start: now + 9 * DAY, cal: 'Home' },
-    { id: 'R', title: 'Weekly', start: now + 16 * DAY, cal: 'Home' },
+    { id: 'A', title: 'First', start: now + 1 * DAY, cal: 'Home', allDay: true },
+    { id: 'R', title: 'Weekly', start: now + 2 * DAY, cal: 'Home', rule: WEEKLY_MONDAY },
+    { id: 'R', title: 'Weekly', start: now + 9 * DAY, cal: 'Home', rule: WEEKLY_MONDAY },
+    { id: 'R', title: 'Weekly', start: now + 16 * DAY, cal: 'Home', rule: WEEKLY_MONDAY },
     { id: 'P', title: 'In progress', start: now - DAY / 24, cal: 'Work' }
   ];
 }
@@ -39,14 +54,25 @@ function resetStore() {
 // access is requested and `pollsToGrant` run-loop turns have passed.
 let ek;
 function setEventKit(initial, { afterRequest = initial, pollsToGrant = 1, legacy = false } = {}) {
-  ek = { status: initial, afterRequest, pollsToGrant, legacy, requested: null, polls: 0 };
+  ek = { status: initial, afterRequest, pollsToGrant, legacy, requested: null, polls: 0, calls: [] };
+}
+
+// Series the fake store can fetch by calendarItemIdentifier (update/delete).
+let ekItems = new Map();
+function ekItem(id, rules) {
+  return {
+    id, rules: [...rules], isNil: () => false,
+    get recurrenceRules() { return nsArray(this.rules); },
+    get hasRecurrenceRules() { return this.rules.length > 0; },
+    removeRecurrenceRule(rule) { this.rules = this.rules.filter(r => r !== rule); }
+  };
 }
 
 function nsDate(ms) {
   return { timeIntervalSince1970: String(ms / 1000), isNil: () => false };
 }
 function nsArray(items) {
-  return { count: items.length, objectAtIndex: (i) => items[i] };
+  return { count: items.length, objectAtIndex: (i) => items[i], isNil: () => false };
 }
 function fakeDollar() {
   const store = {
@@ -54,13 +80,21 @@ function fakeDollar() {
     requestFullAccessToEventsWithCompletion: () => { ek.requested = 'full'; },
     requestAccessToEntityTypeCompletion: () => { ek.requested = 'legacy'; },
     predicateForEventsWithStartDateEndDateCalendars: (s, e) => ({ s, e }),
+    calendarItemWithIdentifier: (id) => ekItems.get(id) || { isNil: () => true },
+    removeEventSpanCommitError: (ev, span, commit) => { ek.calls.push(['remove', span, commit]); ekItems.delete(ev.id); return true; },
+    saveEventSpanCommitError: (ev, span, commit) => { ek.calls.push(['save', span, commit]); return true; },
     eventsMatchingPredicate: () => nsArray(EK_EVENTS.map(ev => ({
       calendarItemIdentifier: ev.id,
       title: ev.title,
       location: ev.location,
       startDate: nsDate(ev.start),
       endDate: nsDate(ev.start + 3600 * 1000),
-      calendar: { title: ev.cal }
+      calendar: { title: ev.cal },
+      // EKEvent's allDay property has the getter isAllDay; that is what the
+      // bridge exposes. No `allDay` key here, so reading it would fail the test.
+      isAllDay: ev.allDay === true,
+      hasRecurrenceRules: !!ev.rule,
+      recurrenceRules: ev.rule ? nsArray([ev.rule]) : NIL
     })))
   };
   return Object.assign(() => undefined, {
@@ -87,12 +121,14 @@ function fakeDollar() {
 
 let scripts = [];
 let appleScriptEvents = [];
+let appleScriptReply = 'deleted:direct';
 const realRequire = Module.prototype.require;
 Module.prototype.require = function (id) {
   if (id === '../utils/applescript') {
     const real = realRequire.apply(this, arguments);
     return {
       ...real,
+      runAppleScript: async (script) => { scripts.push(script); return appleScriptReply; },
       runJXA: async (script) => {
         scripts.push(script);
         if (script.includes("ObjC.import('EventKit')")) {
@@ -118,7 +154,7 @@ async function run(count, days) {
   finally { console.error = realError; }
 }
 const calendarAppCalls = () => scripts.filter(s => s.includes("Application('Calendar')")).length;
-const KEYS = 'calendar,endDate,id,location,startDate,summary';
+const KEYS = 'allDay,calendar,endDate,id,location,recurrence,startDate,summary';
 
 (async () => {
   console.log('\nLOCAL list-events via EventKit');
@@ -166,6 +202,98 @@ const KEYS = 'calendar,endDate,id,location,startDate,summary';
     setEventKit(3);
     const r = await run(25, 30);
     assert(r.filter(e => e.id === 'R').length === 3);
+  });
+
+  await check('recurrence comes back as an RRULE on every occurrence; others are null', async () => {
+    setEventKit(3);
+    const r = await run(25, 30);
+    const weekly = r.filter(e => e.id === 'R');
+    assert(weekly.length === 3 && weekly.every(e => e.recurrence === 'FREQ=WEEKLY;BYDAY=MO'), JSON.stringify(weekly[0]));
+    assert(r.filter(e => e.id !== 'R').every(e => e.recurrence === null), 'non-recurring event has a rule');
+  });
+
+  await check('allDay is reported', async () => {
+    setEventKit(3);
+    const r = await run(25, 30);
+    assert(r.find(e => e.id === 'A').allDay === true && r.find(e => e.id === 'C').allDay === false);
+  });
+
+  await check('rules with interval, positions, month days, UNTIL, COUNT and WKST round-trip', async () => {
+    setEventKit(3);
+    const until = Date.UTC(2027, 11, 31, 23, 59, 59);
+    const cases = [
+      [ekRule({ frequency: 2, interval: 2, days: [[6, -1]], end: { isNil: () => false, endDate: nsDate(until), occurrenceCount: 0 } }),
+        'FREQ=MONTHLY;INTERVAL=2;BYDAY=-1FR;UNTIL=20271231T235959Z'],
+      [ekRule({ frequency: 3, months: [12], monthDays: [25], end: { isNil: () => false, endDate: NIL, occurrenceCount: 5 } }),
+        'FREQ=YEARLY;BYMONTHDAY=25;BYMONTH=12;COUNT=5'],
+      [ekRule({ frequency: 0, wkst: 2 }), 'FREQ=DAILY;WKST=MO'],
+      [ekRule({ frequency: 1, days: [[2, 0], [4, 0], [9, 0]] }), 'FREQ=WEEKLY;BYDAY=MO,WE'],
+      [ekRule({ frequency: 9 }), null]
+    ];
+    for (const [rule, expected] of cases) {
+      EK_EVENTS = [{ id: 'X', title: 'Rule', start: now + DAY, cal: 'Home', rule }];
+      const r = await run(25, 30);
+      assert(r[0].recurrence === expected, 'got ' + r[0].recurrence + ', want ' + expected);
+    }
+    resetStore();
+  });
+
+  await check('an all-day series reports UNTIL as a date, matching its DATE start', async () => {
+    setEventKit(3);
+    const until = new Date(2027, 11, 31, 23, 59, 59).getTime();
+    const rule = ekRule({ frequency: 3, end: { isNil: () => false, endDate: nsDate(until), occurrenceCount: 0 } });
+    EK_EVENTS = [{ id: 'Y', title: 'Yearly', start: now + DAY, cal: 'Home', allDay: true, rule }];
+    const r = await run(25, 30);
+    resetStore();
+    assert(r[0].recurrence === 'FREQ=YEARLY;UNTIL=20271231', 'got ' + r[0].recurrence);
+  });
+
+  await check('the Calendar.app fallback reads the all-day flag and the rule too', async () => {
+    setEventKit(2);
+    await run(25, 30);
+    const s = scripts.find(x => x.includes("Application('Calendar')"));
+    assert(s && s.includes('evts.alldayEvent()') && s.includes('evts.recurrence()'), 'fallback does not read them');
+    assert(/try \{ alldays = evts\.alldayEvent\(\); \} catch/.test(s), 'a calendar without the property would be skipped');
+  });
+
+  await check('delete-event with full access: EventKit removes the whole series', async () => {
+    setEventKit(3);
+    ekItems = new Map([['S', ekItem('S', [WEEKLY_MONDAY])]]);
+    scripts = [];
+    const r = await client.deleteEvent('S');
+    assert(r.success === true && r.method === 'eventkit', JSON.stringify(r));
+    assert(ek.calls.length === 1 && ek.calls[0].join() === 'remove,1,true', 'not EKSpanFutureEvents: ' + JSON.stringify(ek.calls));
+    assert(!scripts.some(s => s.includes('tell application "Calendar"')), 'Calendar.app scripted anyway');
+  });
+
+  await check('clearing a recurrence with full access: EventKit strips the rules and saves the series', async () => {
+    setEventKit(3);
+    const item = ekItem('S', [WEEKLY_MONDAY]);
+    ekItems = new Map([['S', item]]);
+    scripts = [];
+    const r = await client.updateEvent('S', { recurrence: '' });
+    assert(r.success === true, JSON.stringify(r));
+    assert(item.rules.length === 0 && ek.calls.some(c => c.join() === 'save,1,true'), JSON.stringify(ek.calls));
+    assert(!scripts.some(s => s.includes('tell application "Calendar"')), 'Calendar.app scripted anyway');
+  });
+
+  await check('write-only (4) or unknown id: EventKit is left alone, Calendar.app does it', async () => {
+    setEventKit(4);
+    ekItems = new Map([['S', ekItem('S', [WEEKLY_MONDAY])]]);
+    scripts = [];
+    let r = await client.deleteEvent('S');
+    assert(r.method === 'direct' && ek.calls.length === 0 && ek.requested === null, JSON.stringify(r));
+    setEventKit(3);
+    r = await client.deleteEvent('missing-id');
+    assert(r.method === 'direct' && ek.calls.length === 0, 'EventKit acted on an id it could not fetch');
+    assert(scripts.some(s => s.includes('tell application "Calendar"')));
+  });
+
+  await check('the series id reaches the EventKit script as a JSON string', async () => {
+    setEventKit(2);
+    scripts = [];
+    await client.deleteEvent('x"); $.NSFileManager; ("');
+    assert(scripts[0].includes('const id = "x\\"); $.NSFileManager; (\\"";'), scripts[0].split('\n').find(l => l.includes('const id')));
   });
 
   await check('denied (2): falls back to Calendar.app and says so on stderr', async () => {

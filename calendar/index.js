@@ -10,6 +10,7 @@ const { isLocalMode } = require('../mode');
 const { formatSuccess, formatError, withErrorHandler } = require('../utils/error-handler');
 const { listOutput, listResult } = require('../utils/schemas');
 const { formatDate } = require('../utils/date-utils');
+const { RECURRENCE_INPUT, normalizeRecurrence, parseEventDate, allDayRange, addDays, formatDay } = require('./recurrence');
 const config = require('../config');
 
 /**
@@ -29,7 +30,8 @@ function normalizeEvent(event, local) {
     end: event.endDate ? new Date(event.endDate) : null,
     location: event.location || '',
     calendarName: event.calendar,
-    isAllDay: false,
+    isAllDay: event.allDay === true,
+    recurrence: event.recurrence ? String(event.recurrence).replace(/^RRULE:/i, '') : null,
     ref: event.id,
     uid: event.id
   };
@@ -61,13 +63,15 @@ async function handleListEvents(args) {
   }
 
   const lines = events.map((event, i) => {
+    // All-day starts are local midnight: print the local day, not a time zone's view of it.
     const dateStr = event.isAllDay
-      ? `All day: ${formatDate(event.start, { hour: undefined, minute: undefined })}`
+      ? `All day: ${event.start ? formatDay(event.start) : ''}`
       : `${formatDate(event.start)} - ${formatDate(event.end, { year: undefined, month: undefined, day: undefined })}`;
 
     let line = `${i + 1}. ${event.summary}\n   ${dateStr}`;
     if (event.location) line += `\n   Location: ${event.location}`;
     if (event.calendarName) line += `\n   Calendar: ${event.calendarName}`;
+    if (event.recurrence) line += `\n   Repeats: ${event.recurrence}`;
     line += `\n   ${local ? 'ID' : 'URL'}: ${event.ref}`;
 
     return line;
@@ -90,6 +94,9 @@ async function handleCreateEvent(args) {
     return formatError(new Error('End date/time is required (ISO 8601 format)'));
   }
 
+  const recurrence = normalizeRecurrence(args.recurrence);
+  const allDay = args.allDay === true;
+
   const local = isLocalMode();
   const client = local ? localClient : cloudClient;
 
@@ -99,12 +106,23 @@ async function handleCreateEvent(args) {
     end: args.end,
     description: args.description,
     location: args.location,
+    allDay,
+    recurrence,
     calendarUrl: args.calendarUrl,   // cloud
     calendarName: args.calendarName  // local
   });
 
+  let when;
+  if (allDay) {
+    const { startDay, endDay } = allDayRange(args.start, args.end);
+    const lastDay = addDays(endDay, -1);
+    when = `All day: ${formatDay(startDay)}${lastDay > startDay ? ` to ${formatDay(lastDay)}` : ''}`;
+  } else {
+    when = `Start: ${formatDate(parseEventDate(args.start))}\nEnd: ${formatDate(parseEventDate(args.end))}`;
+  }
+
   return formatSuccess(
-    `Event created successfully!\n\nTitle: ${args.summary}\nStart: ${formatDate(new Date(args.start))}\nEnd: ${formatDate(new Date(args.end))}${args.location ? `\nLocation: ${args.location}` : ''}${result.calendar ? `\nCalendar: ${result.calendar}` : ''}\n${local ? 'ID' : 'UID'}: ${result.uid || result.id}`
+    `Event created successfully!\n\nTitle: ${args.summary}\n${when}${args.location ? `\nLocation: ${args.location}` : ''}${recurrence ? `\nRepeats: ${recurrence}` : ''}${result.calendar ? `\nCalendar: ${result.calendar}` : ''}\n${local ? 'ID' : 'UID'}: ${result.uid || result.id}`
   );
 }
 
@@ -117,13 +135,15 @@ async function handleUpdateEvent(args) {
   }
 
   const changes = {};
-  for (const field of ['summary', 'start', 'end', 'description', 'location']) {
+  for (const field of ['summary', 'start', 'end', 'description', 'location', 'allDay', 'recurrence']) {
     if (args[field] !== undefined) changes[field] = args[field];
   }
 
   if (Object.keys(changes).length === 0) {
-    return formatError(new Error('Nothing to update. Provide at least one of: summary, start, end, description, location.'));
+    return formatError(new Error('Nothing to update. Provide at least one of: summary, start, end, description, location, allDay, recurrence.'));
   }
+
+  if (changes.recurrence !== undefined) changes.recurrence = normalizeRecurrence(changes.recurrence);
 
   for (const field of ['start', 'end']) {
     if (changes[field] !== undefined && Number.isNaN(new Date(changes[field]).getTime())) {
@@ -134,13 +154,16 @@ async function handleUpdateEvent(args) {
   const local = isLocalMode();
   const client = local ? localClient : cloudClient;
 
-  await client.updateEvent(args.eventUrl, changes);
+  const result = await client.updateEvent(args.eventUrl, changes);
+  if (result && result.success === false) {
+    return formatError(new Error(`${result.message || 'Update failed'}: ${args.eventUrl}`));
+  }
 
   const summary = Object.entries(changes)
-    .map(([k, v]) => `${k}: ${v}`)
+    .map(([k, v]) => k === 'recurrence' && v === '' ? 'recurrence: removed' : `${k}: ${v}`)
     .join('\n');
 
-  return formatSuccess(`Event updated successfully.\n\n${summary}`);
+  return formatSuccess(`Event updated successfully.\n\n${summary}${result && result.note ? `\n\nNote: ${result.note}` : ''}`);
 }
 
 /**
@@ -152,7 +175,10 @@ async function handleDeleteEvent(args) {
   }
 
   const client = isLocalMode() ? localClient : cloudClient;
-  await client.deleteEvent(args.eventUrl);
+  const result = await client.deleteEvent(args.eventUrl);
+  if (result && result.success === false) {
+    return formatError(new Error(`${result.message || 'Delete failed'}: ${args.eventUrl}`));
+  }
 
   return formatSuccess(`Event deleted successfully.`);
 }
@@ -176,13 +202,18 @@ async function handleListCalendars() {
   return formatSuccess(`Calendars (${calendars.length}):\n\n${lines.join('\n\n')}`, listResult(calendars));
 }
 
+// Only the RRULE alphabet passes the boundary; normalizeRecurrence then checks
+// the rule part by part before it reaches AppleScript or iCalendar.
+const recurrenceSchema = z.string().max(512).regex(RECURRENCE_INPUT, 'recurrence may only contain letters, digits and = ; , : + -');
+const RRULE_EXAMPLES = 'e.g. FREQ=YEARLY, FREQ=WEEKLY;BYDAY=MO or FREQ=MONTHLY;COUNT=12';
+
 // Tool definitions
 const calendarTools = [
   {
     name: 'list-events',
     outputSchema: listOutput('Calendar events'),
     title: 'List Events',
-    description: 'Lists upcoming calendar events within a look-ahead window (30 days by default, up to 365). Each event carries its title, start and end times, and the ref handle that update-event and delete-event take as their eventUrl argument.',
+    description: 'Lists upcoming calendar events within a look-ahead window (30 days by default, up to 365). Each event carries its title, start and end times, whether it is all-day, its recurrence rule (RRULE) when it repeats, and the ref handle that update-event and delete-event take as their eventUrl argument.',
     inputSchema: {
       count: z.number().int().min(1).max(50).optional().describe('Number of events to retrieve (default: 25, max: 50)'),
       daysAhead: z.number().int().min(1).max(365).optional().describe('Number of days to look ahead (default: 30)')
@@ -193,13 +224,15 @@ const calendarTools = [
   {
     name: 'create-event',
     title: 'Create Event',
-    description: 'Creates a new calendar event',
+    description: 'Creates a new calendar event. Optionally all-day and/or recurring (RRULE).',
     inputSchema: {
       summary: z.string().describe('Event title/summary'),
       start: z.string().describe('Start date/time in ISO 8601 format (e.g., 2026-01-15T10:00:00)'),
       end: z.string().describe('End date/time in ISO 8601 format'),
       description: z.string().optional().describe('Event description (optional)'),
       location: z.string().optional().describe('Event location (optional)'),
+      allDay: z.boolean().optional().describe('All-day event (optional). Pass dates as YYYY-MM-DD; end is exclusive as in iCalendar, and an end on or before start means a single day'),
+      recurrence: recurrenceSchema.optional().describe(`Repeat rule as an RFC 5545 RRULE without the "RRULE:" prefix (optional), ${RRULE_EXAMPLES}`),
       calendarUrl: z.string().optional().describe('Cloud mode: URL of the calendar to add the event to (optional, uses the first calendar)'),
       calendarName: z.string().optional().describe('Local mode: name of the calendar to add the event to (optional, uses the default)')
     },
@@ -209,14 +242,16 @@ const calendarTools = [
   {
     name: 'update-event',
     title: 'Update Event',
-    description: 'Updates an existing calendar event. Only the fields you pass are changed. In cloud mode the CalDAV property-merge preserves recurrence, invitees and alarms (experimental: the live round-trip is not yet verified). In local mode, every occurrence of a recurring event shares the series UID, so this acts on the whole series, not one occurrence.',
+    description: 'Updates an existing calendar event. Only the fields you pass are changed; recurrence sets or (with an empty string) removes the repeat rule. In cloud mode the CalDAV property-merge preserves recurrence, invitees and alarms (experimental: the live round-trip is not yet verified). In local mode, every occurrence of a recurring event shares the series UID, so this acts on the whole series, not one occurrence.',
     inputSchema: {
       eventUrl: z.string().describe('Event handle from list-events: the URL in cloud mode, the UID in local mode'),
       summary: z.string().optional().describe('New event title (optional)'),
       start: z.string().optional().describe('New start date/time in ISO 8601 format (optional)'),
       end: z.string().optional().describe('New end date/time in ISO 8601 format (optional)'),
       description: z.string().optional().describe('New description (optional)'),
-      location: z.string().optional().describe('New location (optional)')
+      location: z.string().optional().describe('New location (optional)'),
+      allDay: z.boolean().optional().describe('Make the event all-day or timed (optional). In cloud mode, pass start and end in the same call when this changes'),
+      recurrence: recurrenceSchema.optional().describe(`New repeat rule as an RFC 5545 RRULE without the "RRULE:" prefix (optional), ${RRULE_EXAMPLES}. An empty string removes the recurrence`)
     },
     annotations: {"readOnlyHint":false,"destructiveHint":true,"idempotentHint":true,"openWorldHint":true},
     handler: withErrorHandler(handleUpdateEvent, 'update-event')
