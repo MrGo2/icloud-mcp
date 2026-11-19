@@ -158,7 +158,10 @@ icloud-mcp/
 - `update-event` - Update event (cloud/CalDAV; preserves RRULE, attendees, alarms).
   `recurrence` sets the rule; `""` removes it (cloud also drops EXDATE, RDATE and
   overrides). The CalDAV merge edits only the master VEVENT's own properties, so
-  VTIMEZONE and VALARM lines are never rewritten. `calendar/recurrence.js`
+  VTIMEZONE and VALARM lines are never rewritten. LOCAL looks the event up
+  before writing, so a refused write is an error and an unknown UID is
+  "not found" (update and delete). Calendar.app all-day events end at 23:59:59
+  of the last day, as EventKit stores them. `calendar/recurrence.js`
   validates every rule part by part (FREQ first, known parts, value grammar)
   before it reaches AppleScript or iCalendar; the zod schema already limits it
   to the RRULE alphabet.

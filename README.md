@@ -68,7 +68,7 @@ Tools marked local only return an error in cloud mode, because the iCloud protoc
 
 - **list-events**: `count` (number, optional, max 50), `daysAhead` (number, optional). Each event reports `isAllDay` and, when it repeats, `recurrence` (an RRULE such as `FREQ=WEEKLY;BYDAY=MO`)
 - **create-event**: `summary`, `start`, `end` (strings, ISO 8601); `description`, `location` (optional); `allDay` (boolean, optional); `recurrence` (string, optional); `calendarUrl` (cloud) or `calendarName` (local)
-- **update-event**: `eventUrl` (string); any of `summary`, `start`, `end`, `description`, `location`, `allDay`, `recurrence`. Only the fields you pass change; `recurrence: ""` turns a series back into a single event
+- **update-event**: `eventUrl` (string); any of `summary`, `start`, `end`, `description`, `location`, `allDay`, `recurrence`. Only the fields you pass change; `recurrence: ""` turns a series back into a single event. An unknown `eventUrl` is an error
 - **delete-event**: `eventUrl` (string)
 - **list-calendars**: no input
 
@@ -238,9 +238,9 @@ Through EventKit, a recurring event appears once per occurrence in the window, a
 | `FREQ=MONTHLY;COUNT=12` | Monthly, twelve times |
 | `FREQ=MONTHLY;BYDAY=-1FR;UNTIL=20271231T235959Z` | Last Friday of each month until the end of 2027 |
 
-The rule must start with `FREQ=` and use only RRULE parts (`INTERVAL`, `COUNT`, `UNTIL`, `BYDAY`, `BYMONTH`, `BYMONTHDAY`…). Anything else is rejected before it reaches Calendar.app or iCloud. On `update-event`, an empty string removes the recurrence. In cloud mode that also drops `EXDATE`, `RDATE` and any moved or edited occurrences, as Calendar does when you set Repeat to None.
+The rule must start with `FREQ=` and use only RRULE parts (`INTERVAL`, `COUNT`, `UNTIL`, `BYDAY`, `BYMONTH`, `BYMONTHDAY`…) with values in their RFC 5545 ranges. `UNTIL` takes the event's type: a date (`UNTIL=20271231`) for all-day events, a UTC date-time (`UNTIL=20271231T235959Z`) for timed ones. Anything else is rejected before it reaches Calendar.app or iCloud. On `update-event`, an empty string removes the recurrence. In cloud mode that also drops `EXDATE`, `RDATE` and any moved or edited occurrences, as Calendar does when you set Repeat to None.
 
-`allDay: true` makes an all-day event. Pass dates as `YYYY-MM-DD`. As in iCalendar the end is exclusive, so a one-day event on 25 December runs `2026-12-25` to `2026-12-26`; an end on or before the start also means one day. In cloud mode, an all-day event keeps its all-day dates when you change only `start` or `end`, and switching `allDay` needs `start` and `end` in the same call.
+`allDay: true` makes an all-day event. Pass dates as `YYYY-MM-DD`. As in iCalendar the end is exclusive, so a one-day event on 25 December runs `2026-12-25` to `2026-12-26`; an end on or before the start also means one day. In cloud mode, an all-day event keeps its all-day dates and its length when you change only `start` or `end`. Switching `allDay` needs `start` and `end` in the same call, and on a series with skipped or edited occurrences also `recurrence: ""`, because those exceptions are stored with the old date type.
 
 `list-events` reports the rule as `recurrence` and the all-day flag as `isAllDay`. Only EventKit expands a series into its occurrences. The Calendar.app fallback and cloud mode return the series itself, with its first start date.
 

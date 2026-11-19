@@ -7,6 +7,10 @@
  * Calendar.app or iCloud.
  */
 
+// West of Greenwich, where reading a bare date as UTC midnight lands on the
+// previous day. Set before any Date is built so the date tests mean something.
+process.env.TZ = 'America/Los_Angeles';
+
 const path = require('path');
 const Module = require('module');
 const { z } = require('zod');
@@ -41,7 +45,11 @@ Module.prototype.require = function (id) {
     return {
       ...real,
       runAppleScript: async (script) => { scripts.push(script); return appleScriptResult; },
-      runJXA: async (script) => { scripts.push(script); return JSON.stringify({ status: 2, requested: false, events: null }); }
+      runJXA: async (script) => {
+        scripts.push(script);
+        if (script.includes("ObjC.import('EventKit')")) return JSON.stringify({ status: 2, requested: false, events: null });
+        return JSON.stringify(listedEvents);
+      }
     };
   }
   if (id === 'tsdav') {
@@ -59,7 +67,7 @@ Module.prototype.require = function (id) {
   return realRequire.apply(this, arguments);
 };
 
-const { normalizeRecurrence, allDayRange, parseEventDate } = require(path.join(ROOT, 'calendar/recurrence'));
+const { normalizeRecurrence, allDayRange, allDayDate, parseEventDate } = require(path.join(ROOT, 'calendar/recurrence'));
 const local = require(path.join(ROOT, 'calendar/local-client'));
 const cloud = require(path.join(ROOT, 'calendar/caldav-client'));
 const mode = require(path.join(ROOT, 'mode'));
@@ -90,6 +98,29 @@ const veventOf = ics => new ICAL.Component(ICAL.parse(ics)).getFirstSubcomponent
     assert(normalizeRecurrence('') === '');
     assert(normalizeRecurrence('  ') === '');
     assert(normalizeRecurrence(undefined) === undefined);
+  });
+
+  await check('"RRULE:" alone is an error, not a request to remove the recurrence', async () => {
+    await rejects(() => normalizeRecurrence('RRULE:'), /Invalid recurrence/);
+  });
+
+  await check('rule-part ranges follow RFC 5545', async () => {
+    for (const ok of ['FREQ=MONTHLY;BYMONTHDAY=-1', 'FREQ=MONTHLY;BYDAY=MO;BYSETPOS=-1', 'FREQ=MONTHLY;BYDAY=+2TU',
+      'FREQ=YEARLY;BYYEARDAY=366', 'FREQ=YEARLY;BYWEEKNO=-53', 'FREQ=DAILY;BYHOUR=0,23;BYMINUTE=59', 'FREQ=YEARLY;UNTIL=20280229']) {
+      assert(normalizeRecurrence(ok) === ok, 'rejected ' + ok);
+    }
+    for (const bad of ['FREQ=YEARLY;BYMONTH=0', 'FREQ=YEARLY;BYMONTH=13', 'FREQ=YEARLY;BYMONTH=-1', 'FREQ=DAILY;BYHOUR=24',
+      'FREQ=MONTHLY;BYMONTHDAY=0', 'FREQ=MONTHLY;BYMONTHDAY=32', 'FREQ=WEEKLY;BYDAY=0MO', 'FREQ=YEARLY;BYDAY=54MO',
+      'FREQ=MONTHLY;BYSETPOS=0', 'FREQ=DAILY;UNTIL=20261399', 'FREQ=DAILY;UNTIL=20260101T999999Z', 'FREQ=YEARLY;UNTIL=20270229']) {
+      await rejects(() => normalizeRecurrence(bad), /Invalid recurrence/);
+    }
+  });
+
+  await check('every accepted rule parses in ical.js', () => {
+    for (const rule of ['FREQ=YEARLY', 'FREQ=WEEKLY;BYDAY=MO,WE;INTERVAL=2', 'FREQ=MONTHLY;BYDAY=-1FR;UNTIL=20271231T235959Z',
+      'FREQ=YEARLY;BYMONTH=3;BYMONTHDAY=14;WKST=MO', 'FREQ=MONTHLY;BYDAY=MO;BYSETPOS=-1;COUNT=6']) {
+      ICAL.Recur.fromString(normalizeRecurrence(rule));
+    }
   });
 
   await check('REJECTS rules that are not RRULEs', async () => {
@@ -123,6 +154,13 @@ const veventOf = ics => new ICAL.Component(ICAL.parse(ics)).getFirstSubcomponent
     assert(d.getFullYear() === 2026 && d.getMonth() === 11 && d.getDate() === 25 && d.getHours() === 0);
   });
 
+  await check('impossible dates and trailing garbage are rejected, not rolled over', async () => {
+    await rejects(() => parseEventDate('2026-02-30'), /Invalid date/);
+    await rejects(() => allDayDate('2026-13-45'), /Invalid date/);
+    await rejects(() => allDayDate('2026-12-25junk'), /Invalid date/);
+    assert(allDayDate('2026-12-25T10:00:00').getDate() === 25);
+  });
+
   await check('end is exclusive; an end on or before start means one day', () => {
     const one = allDayRange('2026-12-25', '2026-12-25');
     assert(one.endDay.getDate() === 26, 'same-day end not widened');
@@ -152,7 +190,19 @@ const veventOf = ics => new ICAL.Component(ICAL.parse(ics)).getFirstSubcomponent
     const s = lastScript();
     assert(s.includes('allday event:true'), 'not all-day');
     assert(/set day of newStart to 25/.test(s) && /set time of newStart to 0\b/.test(s), 'start day wrong');
-    assert(/set day of newEnd to 26/.test(s), 'end is not the next day');
+    // Calendar.app reads next-day midnight as a second day; EventKit itself
+    // ends a one-day event at 23:59:59.
+    assert(/set day of newEnd to 25/.test(s) && /set time of newEnd to 86399/.test(s), 'end is not the last second of the 25th');
+  });
+
+  await check('a multi-day all-day event ends on its last day', async () => {
+    await local.createEvent({ summary: 'Trip', start: '2026-12-25', end: '2026-12-28', allDay: true });
+    assert(/set day of newEnd to 27/.test(lastScript()) && /set time of newEnd to 86399/.test(lastScript()));
+  });
+
+  await check('UNTIL must match the start type', async () => {
+    await rejects(() => local.createEvent({ summary: 'x', start: '2026-12-25', end: '2026-12-25', allDay: true, recurrence: 'FREQ=YEARLY;UNTIL=20301231T235959Z' }), /UNTIL as a date/);
+    await rejects(() => cloud.createEvent({ summary: 'x', start: '2026-12-25T10:00:00Z', end: '2026-12-25T11:00:00Z', recurrence: 'FREQ=YEARLY;UNTIL=20301231' }), /UTC date-time/);
   });
 
   await check('an invalid rule throws before osascript runs', async () => {
@@ -166,7 +216,17 @@ const veventOf = ics => new ICAL.Component(ICAL.parse(ics)).getFirstSubcomponent
     await local.updateEvent('UID-1', { recurrence: 'FREQ=WEEKLY;BYDAY=MO' });
     assert(lastScript().includes('set recurrence of theEvent to "FREQ=WEEKLY;BYDAY=MO"'));
     await local.updateEvent('UID-1', { recurrence: '' });
-    assert(lastScript().includes('set recurrence of theEvent to ""'), 'recurrence not cleared');
+    const s = lastScript();
+    assert(s.includes('set recurrence of theEvent to ""'), 'recurrence not cleared');
+    assert(s.includes('set recurrence of theEvent to missing value'), 'no fallback when "" is refused');
+  });
+
+  await check('update finds the event first and writes outside the lookup try', async () => {
+    await local.updateEvent('UID-1', { summary: 'New' });
+    const s = lastScript();
+    const lookupEnd = s.indexOf('end repeat');
+    assert(lookupEnd !== -1 && s.indexOf('set summary of theEvent') > lookupEnd, 'write still inside the lookup');
+    assert(s.includes('if theEvent is missing value then return "not found"'));
   });
 
   await check('update toggles allDay before touching the dates', async () => {
@@ -174,9 +234,12 @@ const veventOf = ics => new ICAL.Component(ICAL.parse(ics)).getFirstSubcomponent
     const s = lastScript();
     assert(s.includes('set allday event of theEvent to true'));
     assert(s.indexOf('set allday event') < s.indexOf('set start date'), 'dates set before the flag');
-    assert(/set day of newEnd to 26/.test(s), 'all-day end not exclusive');
+    assert(/set day of newEnd to 25/.test(s) && /set time of newEnd to 86399/.test(s), 'all-day end not on the last day');
     await local.updateEvent('UID-1', { allDay: false });
     assert(lastScript().includes('set allday event of theEvent to false'));
+    // A UTC timestamp still names the 25th, even eight hours west of Greenwich.
+    await local.updateEvent('UID-1', { allDay: true, start: '2026-12-25T00:00:00Z' });
+    assert(/set day of newStart to 25/.test(lastScript()) && /set time of newStart to 0\b/.test(lastScript()), 'start moved to the 24th');
   });
 
   console.log('\nCLOUD create-event (CalDAV)');
@@ -206,6 +269,17 @@ const veventOf = ics => new ICAL.Component(ICAL.parse(ics)).getFirstSubcomponent
     const sent = icsSent.length;
     await rejects(() => cloud.createEvent({ summary: 'x', start: '2026-12-21', end: '2026-12-21', recurrence: EXPLOIT_ICS }), /Invalid recurrence/);
     assert(icsSent.length === sent, 'ICS was sent');
+  });
+
+  await check('ICS lines end in CRLF and long lines fold at 75 octets', async () => {
+    const longTitle = 'Revisión trimestral del año '.repeat(5);
+    await cloud.createEvent({ summary: longTitle, start: '2026-12-21T09:00:00Z', end: '2026-12-21T10:00:00Z', recurrence: 'FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1;BYMONTH=1,2,3,4,5,6,7,8,9,10,11,12' });
+    const ics = lastIcs();
+    assert(!/[^\r]\n/.test(ics), 'bare LF line ending');
+    for (const line of ics.split('\r\n')) assert(Buffer.byteLength(line) <= 75, 'line over 75 octets: ' + line);
+    const vevent = veventOf(ics);
+    assert(vevent.getFirstPropertyValue('summary') === longTitle, 'summary changed by folding');
+    assert(/BYMONTH=1,2,3/.test(vevent.getFirstPropertyValue('rrule').toString()), 'rule changed by folding');
   });
 
   await check('a line break in SUMMARY, even a lone CR, cannot start a new property', async () => {
@@ -292,6 +366,41 @@ const veventOf = ics => new ICAL.Component(ICAL.parse(ics)).getFirstSubcomponent
     assert(out.includes('DTSTART:20270101T100000Z') && out.includes('DTEND:20270101T110000Z'), out);
   });
 
+  await check('a folded DTSTART;VALUE=DATE is still recognized as all-day', () => {
+    const folded = ALL_DAY.replace('DTSTART;VALUE=DATE:20261225', 'DTSTART;\r\n VALUE=DATE:20261225');
+    const out = applyICalChanges(folded, { end: '2026-12-28' });
+    assert(out.includes('DTEND;VALUE=DATE:20261228'), out);
+  });
+
+  await check('moving only the start of an all-day event keeps its length', () => {
+    const ics = ALL_DAY.replace('DURATION:P1D', 'DTEND;VALUE=DATE:20261227');
+    const out = applyICalChanges(ics, { start: '2026-12-30' });
+    assert(out.includes('DTSTART;VALUE=DATE:20261230') && out.includes('DTEND;VALUE=DATE:20270101'), out);
+  });
+
+  await check('switching allDay on a series with exceptions is refused unless the recurrence goes', async () => {
+    const args = { allDay: true, start: '2026-01-05', end: '2026-01-05' };
+    await rejects(() => applyICalChanges(SERIES, args), /exceptions/);
+    const out = applyICalChanges(SERIES, { ...args, recurrence: '' });
+    assert(out.includes('DTSTART;VALUE=DATE:20260105') && !out.includes('EXDATE') && !out.includes('RECURRENCE-ID'), out);
+  });
+
+  await check('a new rule must match the event type', async () => {
+    await rejects(() => applyICalChanges(ALL_DAY, { recurrence: 'FREQ=YEARLY;UNTIL=20301231T235959Z' }), /UNTIL as a date/);
+    assert(applyICalChanges(ALL_DAY, { recurrence: 'FREQ=YEARLY;UNTIL=20301231' }).includes('RRULE:FREQ=YEARLY;UNTIL=20301231'));
+  });
+
+  await check('parseEvent reads the master even when an override comes first', () => {
+    const lines = SERIES.split('\r\n');
+    const masterStart = lines.indexOf('BEGIN:VEVENT');
+    const overrideStart = lines.lastIndexOf('BEGIN:VEVENT');
+    const master = lines.slice(masterStart, overrideStart);
+    const override = lines.slice(overrideStart, lines.length - 1);
+    const reordered = [...lines.slice(0, masterStart), ...override, ...master, 'END:VCALENDAR'].join('\r\n');
+    const ev = cloud.parseEvent(reordered, 'u');
+    assert(ev.summary === 'Weekly sync' && /^FREQ=WEEKLY/.test(ev.recurrence), JSON.stringify(ev));
+  });
+
   await check('parseEvent reports the recurrence', () => {
     const ev = cloud.parseEvent(SERIES, 'https://caldav.example/cal/1.ics');
     assert(/^FREQ=WEEKLY;BYDAY=MO/.test(ev.recurrence), 'got ' + ev.recurrence);
@@ -320,6 +429,36 @@ const veventOf = ics => new ICAL.Component(ICAL.parse(ics)).getFirstSubcomponent
   await check('update-event says when the recurrence was removed', async () => {
     const r = await tool('update-event').handler({ eventUrl: 'UID-1', recurrence: '' });
     assert(!r.isError && /recurrence: removed/.test(r.content[0].text), r.content[0].text);
+  });
+
+  await check('update-event and delete-event report a missing event as an error', async () => {
+    appleScriptResult = 'not found';
+    try {
+      const u = await tool('update-event').handler({ eventUrl: 'NOPE', recurrence: '' });
+      assert(u.isError === true && /not found/i.test(u.content[0].text), 'update: ' + u.content[0].text);
+      const d = await tool('delete-event').handler({ eventUrl: 'NOPE' });
+      assert(d.isError === true && /not found/i.test(d.content[0].text), 'delete: ' + d.content[0].text);
+    } finally {
+      appleScriptResult = 'UID-1';
+    }
+  });
+
+  await check('create-event confirms a multi-day all-day event by its last day', async () => {
+    const r = await tool('create-event').handler({ summary: 'Trip', start: '2026-12-25', end: '2026-12-28', allDay: true });
+    assert(/All day: 2026-12-25 to 2026-12-27/.test(r.content[0].text), r.content[0].text);
+  });
+
+  await check('list-events shows the rule and the all-day day, and returns both as data', async () => {
+    listedEvents = [
+      { id: 'W', summary: 'Weekly', startDate: new Date(Date.now() + 86400000).toISOString(), endDate: null, location: '', calendar: 'Home', allDay: false, recurrence: 'FREQ=WEEKLY;BYDAY=MO' },
+      { id: 'H', summary: 'Holiday', startDate: new Date(2099, 11, 25).toISOString(), endDate: null, location: '', calendar: 'Home', allDay: true, recurrence: 'RRULE:FREQ=YEARLY' }
+    ];
+    const r = await tool('list-events').handler({ count: 10, daysAhead: 365 });
+    const text = r.content[0].text;
+    assert(/Repeats: FREQ=WEEKLY;BYDAY=MO/.test(text) && /All day: 2099-12-25/.test(text), text);
+    const items = r.structuredContent.items;
+    assert(items.find(e => e.ref === 'H').isAllDay === true && items.find(e => e.ref === 'H').recurrence === 'FREQ=YEARLY', 'prefix not stripped');
+    assert(items.find(e => e.ref === 'W').isAllDay === false);
   });
 
   mode.setMode(originalMode);

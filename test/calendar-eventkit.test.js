@@ -76,7 +76,9 @@ function fakeDollar() {
       startDate: nsDate(ev.start),
       endDate: nsDate(ev.start + 3600 * 1000),
       calendar: { title: ev.cal },
-      allDay: ev.allDay === true,
+      // EKEvent's allDay property has the getter isAllDay; that is what the
+      // bridge exposes. No `allDay` key here, so reading it would fail the test.
+      isAllDay: ev.allDay === true,
       hasRecurrenceRules: !!ev.rule,
       recurrenceRules: ev.rule ? nsArray([ev.rule]) : NIL
     })))
@@ -209,6 +211,7 @@ const KEYS = 'allDay,calendar,endDate,id,location,recurrence,startDate,summary';
       [ekRule({ frequency: 3, months: [12], monthDays: [25], end: { isNil: () => false, endDate: NIL, occurrenceCount: 5 } }),
         'FREQ=YEARLY;BYMONTHDAY=25;BYMONTH=12;COUNT=5'],
       [ekRule({ frequency: 0, wkst: 2 }), 'FREQ=DAILY;WKST=MO'],
+      [ekRule({ frequency: 1, days: [[2, 0], [4, 0], [9, 0]] }), 'FREQ=WEEKLY;BYDAY=MO,WE'],
       [ekRule({ frequency: 9 }), null]
     ];
     for (const [rule, expected] of cases) {
@@ -217,6 +220,24 @@ const KEYS = 'allDay,calendar,endDate,id,location,recurrence,startDate,summary';
       assert(r[0].recurrence === expected, 'got ' + r[0].recurrence + ', want ' + expected);
     }
     resetStore();
+  });
+
+  await check('an all-day series reports UNTIL as a date, matching its DATE start', async () => {
+    setEventKit(3);
+    const until = new Date(2027, 11, 31, 23, 59, 59).getTime();
+    const rule = ekRule({ frequency: 3, end: { isNil: () => false, endDate: nsDate(until), occurrenceCount: 0 } });
+    EK_EVENTS = [{ id: 'Y', title: 'Yearly', start: now + DAY, cal: 'Home', allDay: true, rule }];
+    const r = await run(25, 30);
+    resetStore();
+    assert(r[0].recurrence === 'FREQ=YEARLY;UNTIL=20271231', 'got ' + r[0].recurrence);
+  });
+
+  await check('the Calendar.app fallback reads the all-day flag and the rule too', async () => {
+    setEventKit(2);
+    await run(25, 30);
+    const s = scripts.find(x => x.includes("Application('Calendar')"));
+    assert(s && s.includes('evts.alldayEvent()') && s.includes('evts.recurrence()'), 'fallback does not read them');
+    assert(/try \{ alldays = evts\.alldayEvent\(\); \} catch/.test(s), 'a calendar without the property would be skipped');
   });
 
   await check('denied (2): falls back to Calendar.app and says so on stderr', async () => {

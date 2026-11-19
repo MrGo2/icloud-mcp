@@ -10,7 +10,7 @@ const { isLocalMode } = require('../mode');
 const { formatSuccess, formatError, withErrorHandler } = require('../utils/error-handler');
 const { listOutput, listResult } = require('../utils/schemas');
 const { formatDate } = require('../utils/date-utils');
-const { RECURRENCE_INPUT, normalizeRecurrence } = require('./recurrence');
+const { RECURRENCE_INPUT, normalizeRecurrence, parseEventDate, allDayRange, addDays, formatDay } = require('./recurrence');
 const config = require('../config');
 
 /**
@@ -63,8 +63,9 @@ async function handleListEvents(args) {
   }
 
   const lines = events.map((event, i) => {
+    // All-day starts are local midnight: print the local day, not a time zone's view of it.
     const dateStr = event.isAllDay
-      ? `All day: ${formatDate(event.start, { hour: undefined, minute: undefined })}`
+      ? `All day: ${event.start ? formatDay(event.start) : ''}`
       : `${formatDate(event.start)} - ${formatDate(event.end, { year: undefined, month: undefined, day: undefined })}`;
 
     let line = `${i + 1}. ${event.summary}\n   ${dateStr}`;
@@ -111,11 +112,13 @@ async function handleCreateEvent(args) {
     calendarName: args.calendarName  // local
   });
 
-  let when = `Start: ${formatDate(new Date(args.start))}\nEnd: ${formatDate(new Date(args.end))}`;
+  let when;
   if (allDay) {
-    const firstDay = String(args.start).slice(0, 10);
-    const endDay = String(args.end).slice(0, 10);
-    when = `All day: ${firstDay}${endDay > firstDay ? ` until ${endDay} (exclusive)` : ''}`;
+    const { startDay, endDay } = allDayRange(args.start, args.end);
+    const lastDay = addDays(endDay, -1);
+    when = `All day: ${formatDay(startDay)}${lastDay > startDay ? ` to ${formatDay(lastDay)}` : ''}`;
+  } else {
+    when = `Start: ${formatDate(parseEventDate(args.start))}\nEnd: ${formatDate(parseEventDate(args.end))}`;
   }
 
   return formatSuccess(
@@ -151,7 +154,10 @@ async function handleUpdateEvent(args) {
   const local = isLocalMode();
   const client = local ? localClient : cloudClient;
 
-  await client.updateEvent(args.eventUrl, changes);
+  const result = await client.updateEvent(args.eventUrl, changes);
+  if (result && result.success === false) {
+    return formatError(new Error(`${result.message || 'Update failed'}: ${args.eventUrl}`));
+  }
 
   const summary = Object.entries(changes)
     .map(([k, v]) => k === 'recurrence' && v === '' ? 'recurrence: removed' : `${k}: ${v}`)
@@ -169,7 +175,10 @@ async function handleDeleteEvent(args) {
   }
 
   const client = isLocalMode() ? localClient : cloudClient;
-  await client.deleteEvent(args.eventUrl);
+  const result = await client.deleteEvent(args.eventUrl);
+  if (result && result.success === false) {
+    return formatError(new Error(`${result.message || 'Delete failed'}: ${args.eventUrl}`));
+  }
 
   return formatSuccess(`Event deleted successfully.`);
 }

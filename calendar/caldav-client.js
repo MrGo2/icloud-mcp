@@ -6,7 +6,7 @@ const { DAVClient } = require('tsdav');
 const ICAL = require('ical.js');
 const config = require('../config');
 const { getCredentials } = require('../auth');
-const { normalizeRecurrence, parseEventDate, allDayRange } = require('./recurrence');
+const { normalizeRecurrence, checkUntilType, parseEventDate, allDayRange, addDays } = require('./recurrence');
 
 let cachedClient = null;
 
@@ -70,7 +70,9 @@ function parseEvent(icalData, url) {
   try {
     const jcalData = ICAL.parse(icalData);
     const comp = new ICAL.Component(jcalData);
-    const vevent = comp.getFirstSubcomponent('vevent');
+    // The series master, not an overridden occurrence that may come first.
+    const vevents = comp.getAllSubcomponents('vevent');
+    const vevent = vevents.find(v => !v.hasProperty('recurrence-id')) || vevents[0];
 
     if (!vevent) return null;
 
@@ -147,6 +149,7 @@ async function listEvents(count = 25, daysAhead = 30) {
  */
 async function createEvent({ summary, start, end, description, location, calendarUrl, allDay = false, recurrence }) {
   const rule = normalizeRecurrence(recurrence);
+  checkUntilType(rule, allDay === true);
   const client = await getClient();
 
   // Get calendars if URL not provided
@@ -178,17 +181,22 @@ async function createEvent({ summary, start, end, description, location, calenda
     dtEnd = `DTEND:${formatICalDate(parseEventDate(end))}`;
   }
 
-  const icalData = `BEGIN:VCALENDAR
-VERSION:2.0
-PRODID:-//iCloud MCP//EN
-BEGIN:VEVENT
-UID:${uid}
-DTSTAMP:${formatICalDate(new Date())}
-${dtStart}
-${dtEnd}
-SUMMARY:${escapeICalText(summary)}${description ? `\nDESCRIPTION:${escapeICalText(description)}` : ''}${location ? `\nLOCATION:${escapeICalText(location)}` : ''}${rule ? `\nRRULE:${rule}` : ''}
-END:VEVENT
-END:VCALENDAR`;
+  const icalData = [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//iCloud MCP//EN',
+    'BEGIN:VEVENT',
+    `UID:${uid}`,
+    `DTSTAMP:${formatICalDate(new Date())}`,
+    dtStart,
+    dtEnd,
+    `SUMMARY:${escapeICalText(summary)}`,
+    description ? `DESCRIPTION:${escapeICalText(description)}` : null,
+    location ? `LOCATION:${escapeICalText(location)}` : null,
+    rule ? `RRULE:${rule}` : null,
+    'END:VEVENT',
+    'END:VCALENDAR'
+  ].filter(Boolean).map(foldLine).join('\r\n');
 
   const result = await client.createCalendarObject({
     calendar: targetCalendar,
@@ -233,6 +241,8 @@ function applyICalChanges(ical, { summary, start, end, description, location, al
   }
   const head = i => props[i][0].trim().toUpperCase();
   const nameOf = i => head(i).split(/[:;]/, 1)[0];
+  // The whole property with its continuation lines joined back.
+  const unfolded = i => props[i].map((line, k) => (k ? line.slice(1) : line)).join('');
 
   // Locate every VEVENT and its own (depth 0) properties.
   const vevents = [];
@@ -267,32 +277,52 @@ function applyICalChanges(ical, { summary, start, end, description, location, al
     const idx = find(name);
     drop(name);
     if (idx === undefined) {
-      inserts.push(line);
+      inserts.push(foldLine(line));
     } else {
       removed.delete(idx);
-      props[idx] = [line];
+      props[idx] = [foldLine(line)];
     }
   };
 
-  // Keep DATE vs DATE-TIME consistent: DTSTART and DTEND must share a type.
+  // Keep DATE vs DATE-TIME consistent: DTSTART, DTEND, UNTIL, EXDATE, RDATE
+  // and RECURRENCE-ID must share a value type.
   const dtstart = find('DTSTART');
-  const wasAllDay = dtstart !== undefined && /;VALUE=DATE[;:]/.test(head(dtstart));
-  const isAllDay = allDay === undefined ? wasAllDay : allDay === true;
-  if (isAllDay !== wasAllDay && (start === undefined || end === undefined)) {
-    throw new Error('Changing allDay in cloud mode needs start and end in the same update');
-  }
-  const existingStartDay = () => {
-    const m = dtstart === undefined ? null : /:(\d{4})(\d{2})(\d{2})/.exec(props[dtstart][0]);
-    return m ? `${m[1]}-${m[2]}-${m[3]}` : undefined;
+  const dtend = find('DTEND');
+  const isDateProp = i => i !== undefined && /;VALUE="?DATE"?[;:]/.test(unfolded(i).toUpperCase());
+  const dayOf = i => {
+    const m = i === undefined ? null : /:(\d{4})(\d{2})(\d{2})/.exec(unfolded(i));
+    return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : null;
   };
+  const wasAllDay = isDateProp(dtstart);
+  const isAllDay = allDay === undefined ? wasAllDay : allDay === true;
+
+  if (isAllDay !== wasAllDay) {
+    if (start === undefined || end === undefined) {
+      throw new Error('Changing allDay in cloud mode needs start and end in the same update');
+    }
+    const rrule = find('RRULE');
+    const keepsSeries = rule !== '';
+    const hasExceptions = find('EXDATE') !== undefined || find('RDATE') !== undefined || vevents.some(ev => ev.isOverride);
+    if (keepsSeries && hasExceptions) {
+      throw new Error('This recurring event has exceptions; remove the recurrence (recurrence: "") or change it in Calendar to switch allDay in cloud mode');
+    }
+    if (rule === undefined && rrule !== undefined) checkUntilType(unfolded(rrule).replace(/^RRULE:/i, ''), isAllDay);
+  }
+  if (rule) checkUntilType(rule, isAllDay);
 
   if (summary !== undefined) set('SUMMARY', `SUMMARY:${escapeICalText(summary)}`);
   if (isAllDay && (start !== undefined || end !== undefined)) {
-    const { startDay, endDay } = allDayRange(start !== undefined ? start : existingStartDay(), end);
-    if (start !== undefined) set('DTSTART', `DTSTART;VALUE=DATE:${formatICalDay(startDay)}`);
+    const oldStart = dayOf(dtstart);
+    const newStart = start !== undefined ? allDayRange(start).startDay : oldStart;
+    if (!newStart) throw new Error('The event has no DTSTART to keep; pass start as well');
+    if (start !== undefined) set('DTSTART', `DTSTART;VALUE=DATE:${formatICalDay(newStart)}`);
     if (end !== undefined) {
       drop('DURATION');
-      set('DTEND', `DTEND;VALUE=DATE:${formatICalDay(endDay)}`);
+      set('DTEND', `DTEND;VALUE=DATE:${formatICalDay(allDayRange(formatDayISO(newStart), end).endDay)}`);
+    } else if (wasAllDay && dtend !== undefined && oldStart && dayOf(dtend)) {
+      // Moving only the start keeps the length; DTEND must stay after DTSTART.
+      const span = Math.max(1, Math.round((dayOf(dtend) - oldStart) / 86400000));
+      set('DTEND', `DTEND;VALUE=DATE:${formatICalDay(addDays(newStart, span))}`);
     }
   } else {
     if (start !== undefined) set('DTSTART', `DTSTART:${formatICalDate(parseEventDate(start))}`);
@@ -398,6 +428,34 @@ function formatICalDay(date) {
   return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}`;
 }
 
+/** Local calendar date as YYYY-MM-DD */
+function formatDayISO(date) {
+  const v = formatICalDay(date);
+  return `${v.slice(0, 4)}-${v.slice(4, 6)}-${v.slice(6, 8)}`;
+}
+
+/**
+ * Fold a content line at 75 octets (RFC 5545 section 3.1), never inside a
+ * UTF-8 character.
+ */
+function foldLine(line) {
+  const out = [];
+  let current = '';
+  let octets = 0;
+  for (const ch of line) {
+    const size = Buffer.byteLength(ch);
+    if (octets + size > 75) {
+      out.push(current);
+      current = ' ';
+      octets = 1;
+    }
+    current += ch;
+    octets += size;
+  }
+  out.push(current);
+  return out.join('\r\n');
+}
+
 /**
  * Escape text for iCalendar
  */
@@ -420,5 +478,6 @@ module.exports = {
   updateEvent,
   deleteEvent,
   parseEvent,
-  applyICalChanges
+  applyICalChanges,
+  foldLine
 };
