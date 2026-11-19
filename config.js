@@ -54,7 +54,7 @@ module.exports = {
     PAGE_SIZE: 25,
     MAX_RESULTS: 50,
     EMAIL_BODY_MAX_LENGTH: 50000,
-    DATE_FORMAT: 'es-ES'
+    DATE_FORMAT: process.env.ICLOUD_LOCALE || 'es-ES'
   },
 
   // Email folder mappings

@@ -253,6 +253,24 @@ check('newlines survive escaping as <br>', () => {
   assert(html === 'line one<br>line two', 'got: ' + html);
 });
 
+console.log('\nLocale configuration');
+function relativeDays(locale, daysAgo) {
+  const { spawnSync } = require('child_process');
+  const code = `const { formatRelative } = require('./utils/date-utils');
+    process.stdout.write(formatRelative(new Date(Date.now() - ${daysAgo} * 86400000 - 60000)))`;
+  const env = { ...process.env, ICLOUD_LOCALE: locale };
+  if (!locale) delete env.ICLOUD_LOCALE;
+  return spawnSync(process.execPath, ['-e', code], { cwd: ROOT, env, encoding: 'utf8' }).stdout;
+}
+check('relative days stay Spanish when ICLOUD_LOCALE is unset', () => {
+  const got = [0, 1, 3].map((d) => relativeDays('', d)).join('|');
+  assert(got === 'Hoy|Ayer|Hace 3 días', 'got: ' + got);
+});
+check('ICLOUD_LOCALE words relative days in that locale', () => {
+  const got = [0, 1, 3].map((d) => relativeDays('en-US', d)).join('|');
+  assert(got === 'Today|Yesterday|3 days ago', 'got: ' + got);
+});
+
 console.log('\nError handling contract');
 check('error-handler exports what the modules import', () => {
   const eh = require(path.join(ROOT, 'utils/error-handler'));
