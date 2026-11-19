@@ -165,7 +165,14 @@ icloud-mcp/
   validates every rule part by part (FREQ first, known parts, value grammar)
   before it reaches AppleScript or iCalendar; the zod schema already limits it
   to the RRULE alphabet.
-- `delete-event` - Delete event
+- `delete-event` - Delete event. LOCAL: Calendar.app ignores `set recurrence to ""`
+  and its `delete` leaves a recurring series in place while reporting success.
+  Both `delete-event` and `update-event` with `recurrence: ""` therefore use
+  EventKit (`removeEvent:span:` / `removeRecurrenceRule:` with
+  EKSpanFutureEvents from the first occurrence) when access is full (status 3,
+  never requested), then fall back to Calendar.app attempts, each checked by
+  reading the calendar back; stderr names the fallback used. Write-only access
+  (status 4) cannot fetch existing events, so it counts as no access.
 
 ### Contacts (7)
 - `list-contacts` - List contacts

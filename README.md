@@ -244,6 +244,8 @@ The rule must start with `FREQ=` and use only RRULE parts (`INTERVAL`, `COUNT`, 
 
 `list-events` reports the rule as `recurrence` and the all-day flag as `isAllDay`. Only EventKit expands a series into its occurrences. The Calendar.app fallback and cloud mode return the series itself, with its first start date.
 
+In local mode, Calendar.app scripting cannot remove a recurrence or delete a recurring event: it ignores `set recurrence to ""` and its `delete` reports success while the series stays. So `update-event` (with `recurrence: ""`) and `delete-event` use EventKit on the whole series when the host has full Calendars access, and never ask for it. Otherwise they try the Calendar.app ways one by one and check the calendar after each. The last resort for removing a rule is `FREQ=DAILY;COUNT=1`, which leaves just the original occurrence; the response says so. If nothing works, the tool returns an error instead of a false success.
+
 ### App-specific password (cloud mode)
 
 Cloud mode needs an app-specific password. Your normal Apple ID password will not work, and Apple only issues app-specific passwords on accounts with two-factor authentication turned on.

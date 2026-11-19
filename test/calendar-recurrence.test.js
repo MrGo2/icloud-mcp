@@ -35,6 +35,10 @@ async function rejects(fn, pattern) {
 
 const scripts = [];
 let appleScriptResult = 'UID-1';
+// What Calendar.app answers to the clear-recurrence and delete scripts, which
+// report which attempt worked after checking the result.
+let clearReply = 'cleared:empty';
+let deleteReply = 'deleted:direct';
 const icsSent = [];
 let listedEvents = [];
 
@@ -44,7 +48,13 @@ Module.prototype.require = function (id) {
     const real = realRequire.apply(this, arguments);
     return {
       ...real,
-      runAppleScript: async (script) => { scripts.push(script); return appleScriptResult; },
+      runAppleScript: async (script) => {
+        scripts.push(script);
+        if (appleScriptResult === 'not found') return 'not found';
+        if (script.includes('"cleared:none"')) return clearReply;
+        if (script.includes('"deleted:direct"')) return deleteReply;
+        return appleScriptResult;
+      },
       runJXA: async (script) => {
         scripts.push(script);
         if (script.includes("ObjC.import('EventKit')")) return JSON.stringify({ status: 2, requested: false, events: null });
@@ -215,10 +225,44 @@ const veventOf = ics => new ICAL.Component(ICAL.parse(ics)).getFirstSubcomponent
   await check('update sets a rule, and an empty string clears it', async () => {
     await local.updateEvent('UID-1', { recurrence: 'FREQ=WEEKLY;BYDAY=MO' });
     assert(lastScript().includes('set recurrence of theEvent to "FREQ=WEEKLY;BYDAY=MO"'));
+    const r = await local.updateEvent('UID-1', { recurrence: '' });
+    assert(r.success === true && r.method === 'empty', JSON.stringify(r));
+  });
+
+  await check('clearing tries EventKit, then each Calendar.app way, checking after each', async () => {
+    scripts.length = 0;
     await local.updateEvent('UID-1', { recurrence: '' });
+    assert(scripts[0].includes("ObjC.import('EventKit')") && scripts[0].includes('removeRecurrenceRule'), 'EventKit not tried first');
     const s = lastScript();
-    assert(s.includes('set recurrence of theEvent to ""'), 'recurrence not cleared');
-    assert(s.includes('set recurrence of theEvent to missing value'), 'no fallback when "" is refused');
+    const order = ['set recurrence of theEvent to ""', 'set recurrence of theEvent to missing value', 'set recurrence of theEvent to "FREQ=DAILY;COUNT=1"']
+      .map(step => s.indexOf(step));
+    assert(order.every(i => i !== -1) && order[0] < order[1] && order[1] < order[2], 'attempts missing or out of order');
+    assert((s.match(/set r to recurrence of theEvent/g) || []).length === 4, 'not every attempt is checked');
+  });
+
+  await check('a recurrence Calendar.app will not drop is an error, not a silent success', async () => {
+    clearReply = 'failed:FREQ=YEARLY;INTERVAL=1';
+    try {
+      const r = await local.updateEvent('UID-1', { recurrence: '' });
+      assert(r.success === false && /kept the recurrence/.test(r.message), JSON.stringify(r));
+    } finally { clearReply = 'cleared:empty'; }
+  });
+
+  await check('delete checks what is left after each attempt and restores the rule on failure', async () => {
+    const r = await local.deleteEvent('UID-1');
+    assert(r.success === true && r.method === 'direct', JSON.stringify(r));
+    const s = lastScript();
+    assert((s.match(/count of \(every event of theCal whose uid is "UID-1"\)/g) || []).length === 3, 'an attempt is not checked');
+    assert(s.indexOf('delete theEvent') < s.indexOf('delete (every event of theCal'), 'direct delete not first');
+    assert(/set recurrence of \(first event of theCal whose uid is "UID-1"\) to original/.test(s), 'rule not restored on failure');
+  });
+
+  await check('a recurring event Calendar.app will not delete is an error', async () => {
+    deleteReply = 'failed:recurring';
+    try {
+      const r = await local.deleteEvent('UID-1');
+      assert(r.success === false && /did not delete this recurring event/.test(r.message), JSON.stringify(r));
+    } finally { deleteReply = 'deleted:direct'; }
   });
 
   await check('update finds the event first and writes outside the lookup try', async () => {
@@ -429,6 +473,25 @@ const veventOf = ics => new ICAL.Component(ICAL.parse(ics)).getFirstSubcomponent
   await check('update-event says when the recurrence was removed', async () => {
     const r = await tool('update-event').handler({ eventUrl: 'UID-1', recurrence: '' });
     assert(!r.isError && /recurrence: removed/.test(r.content[0].text), r.content[0].text);
+  });
+
+  await check('update-event explains the repeat-once fallback', async () => {
+    clearReply = 'cleared:count-1';
+    try {
+      const r = await tool('update-event').handler({ eventUrl: 'UID-1', recurrence: '' });
+      assert(!r.isError && /repeats once/.test(r.content[0].text), r.content[0].text);
+    } finally { clearReply = 'cleared:empty'; }
+  });
+
+  await check('update-event and delete-event surface Calendar.app refusals as errors', async () => {
+    clearReply = 'failed:FREQ=YEARLY';
+    deleteReply = 'failed:recurring';
+    try {
+      const u = await tool('update-event').handler({ eventUrl: 'UID-1', recurrence: '' });
+      assert(u.isError === true && /kept the recurrence/.test(u.content[0].text), u.content[0].text);
+      const d = await tool('delete-event').handler({ eventUrl: 'UID-1' });
+      assert(d.isError === true && /did not delete/.test(d.content[0].text), d.content[0].text);
+    } finally { clearReply = 'cleared:empty'; deleteReply = 'deleted:direct'; }
   });
 
   await check('update-event and delete-event report a missing event as an error', async () => {

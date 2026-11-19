@@ -321,26 +321,20 @@ async function updateEvent(eventId, { summary, start, end, location, description
     dateSetup.push(appleScriptDateStmts('newEnd', endDate));
     updateCommands.push('set end date of theEvent to newEnd');
   }
-  if (recurrence !== undefined) {
-    const rule = normalizeRecurrence(recurrence);
-    if (allDay !== undefined) checkUntilType(rule, makeAllDay);
-    if (rule) {
-      updateCommands.push(`set recurrence of theEvent to "${escapeAppleScript(rule)}"`);
-    } else {
-      // An empty rule turns a recurring event back into a single one.
-      updateCommands.push('try\n            set recurrence of theEvent to ""\n          on error\n            set recurrence of theEvent to missing value\n          end try');
-    }
-  }
+  const rule = recurrence === undefined ? undefined : normalizeRecurrence(recurrence);
+  if (rule !== undefined && allDay !== undefined) checkUntilType(rule, makeAllDay);
+  if (rule) updateCommands.push(`set recurrence of theEvent to "${escapeAppleScript(rule)}"`);
   if (location !== undefined) updateCommands.push(`set location of theEvent to "${escapeAppleScript(location || '')}"`);
   if (description !== undefined) updateCommands.push(`set description of theEvent to "${escapeAppleScript(description || '')}"`);
 
-  if (updateCommands.length === 0) {
+  if (updateCommands.length === 0 && rule !== '') {
     return { success: false, message: 'No updates provided' };
   }
 
-  // Look the event up first and change it outside the try, so a failed write
-  // surfaces as an error instead of reading as "not found".
-  const script = `
+  if (updateCommands.length > 0) {
+    // Look the event up first and change it outside the try, so a failed write
+    // surfaces as an error instead of reading as "not found".
+    const script = `
     tell application "Calendar"
       ${dateSetup.join('\n      ')}
       ${findEventStmts(eventId)}
@@ -350,23 +344,134 @@ async function updateEvent(eventId, { summary, start, end, location, description
     end tell
   `;
 
-  const result = await runAppleScript(script);
-  if (result === 'not found') {
-    return { success: false, message: 'Event not found' };
+    const result = await runAppleScript(script);
+    if (result === 'not found') {
+      return { success: false, message: 'Event not found' };
+    }
+  }
+
+  // An empty rule turns a recurring event back into a single one.
+  if (rule === '') {
+    const cleared = await clearRecurrence(eventId);
+    if (!cleared.success) return cleared;
+    return { success: true, message: 'Event updated successfully', method: cleared.method, note: cleared.note };
   }
   return { success: true, message: 'Event updated successfully' };
 }
 
+// EKSpanFutureEvents: from a series' first occurrence, that is the whole series.
+const EK_SPAN_FUTURE_EVENTS = 1;
+
+/**
+ * Remove or strip a whole series through EventKit. Runs only with full
+ * Calendars access (status 3) and never asks for it, so with any other status
+ * it does nothing and the caller falls back to Calendar.app.
+ *
+ * Calendar.app scripting cannot do either for a recurring event: it ignores
+ * `set recurrence to ""` and its `delete` leaves the series in place.
+ *
+ * @param {string} eventId - calendarItemIdentifier (= Calendar.app uid)
+ * @param {'delete'|'clear-recurrence'} action
+ * @returns {Promise<{status, found, done}>}
+ */
+async function eventKitSeriesAction(eventId, action) {
+  const script = `
+    ObjC.import('EventKit');
+    const status = Number($.EKEventStore.authorizationStatusForEntityType($.EKEntityTypeEvent));
+    const out = { status, found: false, done: false };
+    if (status === 3) {
+      const store = $.EKEventStore.alloc.init;
+      const id = ${JSON.stringify(String(eventId))};
+      const fetch = () => {
+        const item = store.calendarItemWithIdentifier(id);
+        return item && !item.isNil() ? item : null;
+      };
+      const isTrue = (v) => v === true || v === 1;
+      const ev = fetch();
+      if (ev) {
+        out.found = true;
+        if (${JSON.stringify(action)} === 'delete') {
+          store.removeEventSpanCommitError(ev, ${asInt(EK_SPAN_FUTURE_EVENTS, 1)}, true, null);
+          out.done = fetch() === null;
+        } else {
+          const rules = ev.recurrenceRules;
+          const copy = [];
+          if (rules && !rules.isNil()) for (let i = 0; i < rules.count; i++) copy.push(rules.objectAtIndex(i));
+          copy.forEach((rule) => ev.removeRecurrenceRule(rule));
+          store.saveEventSpanCommitError(ev, ${asInt(EK_SPAN_FUTURE_EVENTS, 1)}, true, null);
+          const again = fetch();
+          out.done = !!again && !isTrue(again.hasRecurrenceRules);
+        }
+      }
+    }
+    JSON.stringify(out);
+  `;
+  try {
+    return JSON.parse(await runJXA(script));
+  } catch (error) {
+    return { status: 'error: ' + error.message, found: false, done: false };
+  }
+}
+
+/**
+ * Turn a recurring event into a single one, checking the result each time:
+ * EventKit when it has full access, then Calendar.app with "" and
+ * missing value, and as a last resort a rule that repeats once
+ * (FREQ=DAILY;COUNT=1), which leaves exactly the original occurrence.
+ */
+async function clearRecurrence(eventId) {
+  const ek = await eventKitSeriesAction(eventId, 'clear-recurrence');
+  if (ek.done) return { success: true, method: 'eventkit' };
+
+  const script = `
+    tell application "Calendar"
+      ${findEventStmts(eventId)}
+      if theEvent is missing value then return "not found"
+      set r to recurrence of theEvent
+      if r is missing value or r is "" then return "cleared:none"
+      try
+        set recurrence of theEvent to ""
+      end try
+      set r to recurrence of theEvent
+      if r is missing value or r is "" then return "cleared:empty"
+      try
+        set recurrence of theEvent to missing value
+      end try
+      set r to recurrence of theEvent
+      if r is missing value or r is "" then return "cleared:missing-value"
+      set recurrence of theEvent to "FREQ=DAILY;COUNT=1"
+      set r to recurrence of theEvent
+      if r contains "COUNT=1" then return "cleared:count-1"
+      return "failed:" & r
+    end tell
+  `;
+  const result = await runAppleScript(script);
+  if (result === 'not found') return { success: false, message: 'Event not found' };
+  const method = result.replace(/^(cleared|failed):/, '');
+  if (result.startsWith('cleared:')) {
+    if (method !== 'none' && method !== 'empty') {
+      console.error(`[icloud-mcp] update-event: recurrence cleared via ${method} (EventKit status ${ek.status})`);
+    }
+    const note = method === 'count-1'
+      ? 'Calendar.app would not drop the rule, so it now repeats once (FREQ=DAILY;COUNT=1): a single occurrence.'
+      : undefined;
+    return { success: true, method, note };
+  }
+  return { success: false, message: `Calendar.app kept the recurrence (${method})` };
+}
+
 /**
  * AppleScript that sets `theEvent` to the event with this UID, searching every
- * calendar, or to missing value.
+ * calendar, and `theCal` to its calendar; both stay missing value if absent.
  */
 function findEventStmts(eventId) {
   return [
     'set theEvent to missing value',
+    'set theCal to missing value',
     'repeat with cal in calendars',
     '  try',
     `    set theEvent to first event of cal whose uid is "${escapeAppleScript(eventId)}"`,
+    '    set theCal to contents of cal',
     '  end try',
     '  if theEvent is not missing value then exit repeat',
     'end repeat'
@@ -388,12 +493,39 @@ function lastSecondBefore(day) {
  * @returns {Promise<Object>} - Result
  */
 async function deleteEvent(eventId) {
+  const ek = await eventKitSeriesAction(eventId, 'delete');
+  if (ek.done) return { success: true, method: 'eventkit', message: 'Event deleted successfully' };
+
+  // Calendar.app reports success on a recurring event and keeps the series,
+  // so every attempt is checked by counting what is left. The last one makes
+  // the series repeat once before deleting it, and restores the rule if that
+  // fails too.
+  const uid = escapeAppleScript(eventId);
+  const left = `(count of (every event of theCal whose uid is "${uid}"))`;
   const script = `
     tell application "Calendar"
       ${findEventStmts(eventId)}
       if theEvent is missing value then return "not found"
-      delete theEvent
-      return "deleted"
+      try
+        delete theEvent
+      end try
+      if ${left} is 0 then return "deleted:direct"
+      try
+        delete (every event of theCal whose uid is "${uid}")
+      end try
+      if ${left} is 0 then return "deleted:whose"
+      set theEvent to first event of theCal whose uid is "${uid}"
+      set original to recurrence of theEvent
+      if original is missing value or original is "" then return "failed:single"
+      try
+        set recurrence of theEvent to "FREQ=DAILY;COUNT=1"
+        delete theEvent
+      end try
+      if ${left} is 0 then return "deleted:count-1"
+      try
+        set recurrence of (first event of theCal whose uid is "${uid}") to original
+      end try
+      return "failed:recurring"
     end tell
   `;
 
@@ -401,7 +533,19 @@ async function deleteEvent(eventId) {
   if (result === 'not found') {
     return { success: false, message: 'Event not found' };
   }
-  return { success: true, message: 'Event deleted successfully' };
+  const method = result.replace(/^(deleted|failed):/, '');
+  if (result.startsWith('deleted:')) {
+    if (method !== 'direct') {
+      console.error(`[icloud-mcp] delete-event: deleted via ${method} (EventKit status ${ek.status})`);
+    }
+    return { success: true, method, message: 'Event deleted successfully' };
+  }
+  return {
+    success: false,
+    message: method === 'recurring'
+      ? 'Calendar.app did not delete this recurring event; delete it in Calendar, or grant full Calendars access so EventKit can'
+      : 'Calendar.app did not delete the event'
+  };
 }
 
 module.exports = {

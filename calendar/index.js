@@ -163,7 +163,7 @@ async function handleUpdateEvent(args) {
     .map(([k, v]) => k === 'recurrence' && v === '' ? 'recurrence: removed' : `${k}: ${v}`)
     .join('\n');
 
-  return formatSuccess(`Event updated successfully.\n\n${summary}`);
+  return formatSuccess(`Event updated successfully.\n\n${summary}${result && result.note ? `\n\nNote: ${result.note}` : ''}`);
 }
 
 /**

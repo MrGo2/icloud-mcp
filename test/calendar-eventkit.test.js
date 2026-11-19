@@ -54,7 +54,18 @@ function resetStore() {
 // access is requested and `pollsToGrant` run-loop turns have passed.
 let ek;
 function setEventKit(initial, { afterRequest = initial, pollsToGrant = 1, legacy = false } = {}) {
-  ek = { status: initial, afterRequest, pollsToGrant, legacy, requested: null, polls: 0 };
+  ek = { status: initial, afterRequest, pollsToGrant, legacy, requested: null, polls: 0, calls: [] };
+}
+
+// Series the fake store can fetch by calendarItemIdentifier (update/delete).
+let ekItems = new Map();
+function ekItem(id, rules) {
+  return {
+    id, rules: [...rules], isNil: () => false,
+    get recurrenceRules() { return nsArray(this.rules); },
+    get hasRecurrenceRules() { return this.rules.length > 0; },
+    removeRecurrenceRule(rule) { this.rules = this.rules.filter(r => r !== rule); }
+  };
 }
 
 function nsDate(ms) {
@@ -69,6 +80,9 @@ function fakeDollar() {
     requestFullAccessToEventsWithCompletion: () => { ek.requested = 'full'; },
     requestAccessToEntityTypeCompletion: () => { ek.requested = 'legacy'; },
     predicateForEventsWithStartDateEndDateCalendars: (s, e) => ({ s, e }),
+    calendarItemWithIdentifier: (id) => ekItems.get(id) || { isNil: () => true },
+    removeEventSpanCommitError: (ev, span, commit) => { ek.calls.push(['remove', span, commit]); ekItems.delete(ev.id); return true; },
+    saveEventSpanCommitError: (ev, span, commit) => { ek.calls.push(['save', span, commit]); return true; },
     eventsMatchingPredicate: () => nsArray(EK_EVENTS.map(ev => ({
       calendarItemIdentifier: ev.id,
       title: ev.title,
@@ -107,12 +121,14 @@ function fakeDollar() {
 
 let scripts = [];
 let appleScriptEvents = [];
+let appleScriptReply = 'deleted:direct';
 const realRequire = Module.prototype.require;
 Module.prototype.require = function (id) {
   if (id === '../utils/applescript') {
     const real = realRequire.apply(this, arguments);
     return {
       ...real,
+      runAppleScript: async (script) => { scripts.push(script); return appleScriptReply; },
       runJXA: async (script) => {
         scripts.push(script);
         if (script.includes("ObjC.import('EventKit')")) {
@@ -238,6 +254,46 @@ const KEYS = 'allDay,calendar,endDate,id,location,recurrence,startDate,summary';
     const s = scripts.find(x => x.includes("Application('Calendar')"));
     assert(s && s.includes('evts.alldayEvent()') && s.includes('evts.recurrence()'), 'fallback does not read them');
     assert(/try \{ alldays = evts\.alldayEvent\(\); \} catch/.test(s), 'a calendar without the property would be skipped');
+  });
+
+  await check('delete-event with full access: EventKit removes the whole series', async () => {
+    setEventKit(3);
+    ekItems = new Map([['S', ekItem('S', [WEEKLY_MONDAY])]]);
+    scripts = [];
+    const r = await client.deleteEvent('S');
+    assert(r.success === true && r.method === 'eventkit', JSON.stringify(r));
+    assert(ek.calls.length === 1 && ek.calls[0].join() === 'remove,1,true', 'not EKSpanFutureEvents: ' + JSON.stringify(ek.calls));
+    assert(!scripts.some(s => s.includes('tell application "Calendar"')), 'Calendar.app scripted anyway');
+  });
+
+  await check('clearing a recurrence with full access: EventKit strips the rules and saves the series', async () => {
+    setEventKit(3);
+    const item = ekItem('S', [WEEKLY_MONDAY]);
+    ekItems = new Map([['S', item]]);
+    scripts = [];
+    const r = await client.updateEvent('S', { recurrence: '' });
+    assert(r.success === true, JSON.stringify(r));
+    assert(item.rules.length === 0 && ek.calls.some(c => c.join() === 'save,1,true'), JSON.stringify(ek.calls));
+    assert(!scripts.some(s => s.includes('tell application "Calendar"')), 'Calendar.app scripted anyway');
+  });
+
+  await check('write-only (4) or unknown id: EventKit is left alone, Calendar.app does it', async () => {
+    setEventKit(4);
+    ekItems = new Map([['S', ekItem('S', [WEEKLY_MONDAY])]]);
+    scripts = [];
+    let r = await client.deleteEvent('S');
+    assert(r.method === 'direct' && ek.calls.length === 0 && ek.requested === null, JSON.stringify(r));
+    setEventKit(3);
+    r = await client.deleteEvent('missing-id');
+    assert(r.method === 'direct' && ek.calls.length === 0, 'EventKit acted on an id it could not fetch');
+    assert(scripts.some(s => s.includes('tell application "Calendar"')));
+  });
+
+  await check('the series id reaches the EventKit script as a JSON string', async () => {
+    setEventKit(2);
+    scripts = [];
+    await client.deleteEvent('x"); $.NSFileManager; ("');
+    assert(scripts[0].includes('const id = "x\\"); $.NSFileManager; (\\"";'), scripts[0].split('\n').find(l => l.includes('const id')));
   });
 
   await check('denied (2): falls back to Calendar.app and says so on stderr', async () => {
