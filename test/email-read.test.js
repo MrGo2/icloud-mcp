@@ -26,17 +26,22 @@ function fakeMail() {
   const state = { deleted: null };
   let byId;
   const message = (raw) => new Proxy({
-    mailbox: () => ({ messages: { byId: (id) => byId(id) } }),
+    mailbox: () => mailbox(raw.mailbox),
     exists: () => true, id: () => raw.id, subject: () => raw.subject, sender: () => raw.sender,
-    toRecipients: () => [{ address: () => 'me@example.com' }], ccRecipients: () => [],
+    // Both forms work in JXA: per-element (r.address()) and bulk (.address()).
+    toRecipients: Object.assign(() => [{ address: () => 'me@example.com' }], { address: () => ['me@example.com'] }),
+    ccRecipients: Object.assign(() => [], { address: () => [] }),
     dateReceived: () => new Date('2026-10-22T16:50:19Z'), content: () => 'body', readStatus: () => raw.read
   }, { set(t, k, v) { assert(k === 'readStatus'); raw.read = v; return true; } });
   byId = (id) => { const raw = store.find(m => m.id === id); return raw ? message(raw) : { exists: () => false }; };
   const mailbox = (name) => ({
+    name: () => name,
+    account: () => account,
     exists: () => name !== 'Missing',
     messages: { byId: (id) => { const raw = store.find(m => m.id === id); return raw ? message(raw) : { exists: () => false }; } }
   });
   const account = {
+    name: () => 'iCloud',
     mailboxes: Object.assign(() => [mailbox('INBOX'), mailbox('Archive')], { byName: (n) => mailbox(n) })
   };
   const mail = {
