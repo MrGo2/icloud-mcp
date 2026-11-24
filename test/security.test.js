@@ -253,6 +253,23 @@ check('newlines survive escaping as <br>', () => {
   assert(html === 'line one<br>line two', 'got: ' + html);
 });
 
+console.log('\nTimezone configuration');
+function configTimezone(tz) {
+  const { spawnSync } = require('child_process');
+  const r = spawnSync(process.execPath, ['-e', "process.stdout.write(require('./config').DEFAULTS.TIMEZONE)"], {
+    cwd: ROOT, env: { ...process.env, ICLOUD_TIMEZONE: tz }, encoding: 'utf8'
+  });
+  return r.stdout;
+}
+check('timezone defaults to UTC when ICLOUD_TIMEZONE is unset', () => {
+  const tz = configTimezone('');
+  assert(tz === 'UTC', 'got: ' + tz);
+});
+check('ICLOUD_TIMEZONE overrides the default', () => {
+  const tz = configTimezone('Europe/Madrid');
+  assert(tz === 'Europe/Madrid', 'got: ' + tz);
+});
+
 console.log('\nError handling contract');
 check('error-handler exports what the modules import', () => {
   const eh = require(path.join(ROOT, 'utils/error-handler'));

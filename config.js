@@ -50,7 +50,7 @@ module.exports = {
 
   // Default settings
   DEFAULTS: {
-    TIMEZONE: 'Europe/Madrid',
+    TIMEZONE: process.env.ICLOUD_TIMEZONE || 'UTC',
     PAGE_SIZE: 25,
     MAX_RESULTS: 50,
     EMAIL_BODY_MAX_LENGTH: 50000,
