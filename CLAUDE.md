@@ -83,6 +83,11 @@ USE_LOCAL_MODE=true    # true=AppleScript (fast), false=iCloud protocols
 # Only needed for cloud mode:
 ICLOUD_EMAIL=your-email@icloud.com
 ICLOUD_APP_PASSWORD=xxxx-xxxx-xxxx-xxxx
+
+# Optional, cloud-mode sending:
+ICLOUD_FROM_ADDRESS=you@your-domain.com  # From: address; must be verified on the Apple ID (alias / Custom Email Domain). Default: ICLOUD_EMAIL
+ICLOUD_FROM_NAME=Your Name               # display name for From:
+ICLOUD_SAVE_TO_SENT=true                 # file a copy in Sent via IMAP APPEND (default true; false disables)
 ```
 
 ## Architecture

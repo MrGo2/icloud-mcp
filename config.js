@@ -19,6 +19,18 @@ module.exports = {
   ICLOUD_EMAIL: process.env.ICLOUD_EMAIL,
   ICLOUD_APP_PASSWORD: process.env.ICLOUD_APP_PASSWORD,
 
+  // Outgoing identity. SMTP auth always uses ICLOUD_EMAIL (the Apple ID), but
+  // the From: header may be any address verified on that account -- e.g. an
+  // iCloud+ Custom Email Domain alias. Falls back to the Apple ID when unset.
+  FROM: {
+    ADDRESS: process.env.ICLOUD_FROM_ADDRESS,
+    NAME: process.env.ICLOUD_FROM_NAME
+  },
+
+  // Without an IMAP APPEND, mail sent over SMTP leaves no copy in Sent, so it
+  // is filed there by default. Set ICLOUD_SAVE_TO_SENT=false to skip that.
+  SAVE_TO_SENT: process.env.ICLOUD_SAVE_TO_SENT !== 'false',
+
   // IMAP settings for iCloud Mail
   IMAP: {
     HOST: 'imap.mail.me.com',

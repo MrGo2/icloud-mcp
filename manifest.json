@@ -40,7 +40,10 @@
       "env": {
         "USE_LOCAL_MODE": "${user_config.use_local_mode}",
         "ICLOUD_EMAIL": "${user_config.icloud_email}",
-        "ICLOUD_APP_PASSWORD": "${user_config.app_password}"
+        "ICLOUD_APP_PASSWORD": "${user_config.app_password}",
+        "ICLOUD_FROM_ADDRESS": "${user_config.from_address}",
+        "ICLOUD_FROM_NAME": "${user_config.from_name}",
+        "ICLOUD_SAVE_TO_SENT": "${user_config.save_to_sent}"
       }
     }
   },
@@ -63,6 +66,25 @@
       "title": "iCloud app-specific password",
       "description": "Only needed for cloud mode. Generate one at appleid.apple.com under Sign-In and Security > App-Specific Passwords. This is NOT your Apple ID password.",
       "sensitive": true,
+      "required": false
+    },
+    "from_address": {
+      "type": "string",
+      "title": "Send as (From address)",
+      "description": "Only for cloud mode. Send mail from this address instead of your Apple ID. It must already be verified on the same Apple ID: an iCloud email alias, or an address on an iCloud+ Custom Email Domain. Leave empty to send from your Apple ID.",
+      "required": false
+    },
+    "from_name": {
+      "type": "string",
+      "title": "Sender display name",
+      "description": "Only for cloud mode. Optional name shown next to the From address.",
+      "required": false
+    },
+    "save_to_sent": {
+      "type": "boolean",
+      "title": "Save sent mail to the Sent folder",
+      "description": "Only for cloud mode. Files a copy of every sent message in your Sent folder, so it also shows up in Mail on your devices. Turn off to send without keeping a copy.",
+      "default": true,
       "required": false
     }
   },
